@@ -1,15 +1,15 @@
 """
 Assemble the study's PDF presentation (16:9 slides) from already-saved PNGs
 plus a few auxiliary schematic figures (see make_feature_figures.py, run it
-first if hermite_ml/plots/feature_*.png are missing).
+first if ml_corrector/plots/feature_*.png are missing).
 
 One page per slide; each page is a plain matplotlib Figure written into a
 single PDF via PdfPages. No LaTeX/browser dependency.
 
 Usage
 -----
-python3 hermite_ml/make_feature_figures.py   # if not already run
-python3 hermite_ml/make_presentation.py
+python3 scripts/make_feature_figures.py   # if not already run
+python3 scripts/make_presentation.py
 """
 import os
 import textwrap
@@ -20,9 +20,9 @@ import matplotlib.image as mpimg
 from matplotlib.backends.backend_pdf import PdfPages
 
 ROOT = os.path.join(os.path.dirname(__file__), '..')
-PLOTS = os.path.join(os.path.dirname(__file__), 'plots')
+PLOTS = os.path.join(ROOT, 'ml_corrector', 'plots')
 RECON_PLOTS = os.path.join(ROOT, 'reconnection_2d_beta025', 'plots')
-OUT_PDF = os.path.join(os.path.dirname(__file__), 'hermite_corrector_presentation.pdf')
+OUT_PDF = os.path.join(ROOT, 'docs', 'hermite_corrector_presentation.pdf')
 
 PAGE_W, PAGE_H = 13.333, 7.5   # 16:9
 

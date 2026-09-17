@@ -3,10 +3,10 @@ Hermite VDF diagnostic -- run interactively to explore one bulk file.
 
 Usage
 -----
-python3 hermite_ml/run_diagnostic.py   # run from the repo root
+python3 scripts/run_diagnostic.py   # run from the repo root
 
 Tunable parameters are in the CONFIG block below.
-Generates three PNG files in hermite_ml/plots/.
+Generates three PNG files in ml_corrector/plots/.
 """
 
 import os, sys
@@ -15,12 +15,12 @@ import pytools as pt
 
 # import our modules
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-from vdf_tools import (get_vdf_parameters, build_cube,
+from data_processing.vdf_tools import (get_vdf_parameters, build_cube,
                        get_drift_velocity_cube, get_thermal_velocity_cube,
                        to_log_shifted, get_sparse_threshold)
-from hermite_ml.adaptive_hermite import (adaptive_transform, cubic_transform,
+from data_processing.adaptive_hermite import (adaptive_transform, cubic_transform,
                                           coeffs_to_array, total_coeffs, level_sizes)
-from hermite_ml.hermite_plots import (plot_parseval_convergence,
+from ml_corrector.hermite_plots import (plot_parseval_convergence,
                                        plot_spectra_slices,
                                        plot_vdf_comparison,
                                        plot_vdf_residuals,
@@ -45,7 +45,7 @@ EVEN_FIRST    = False   # sequential (default); True = even levels first
 # Orders for the VDF reconstruction comparison plot
 COMPARE_ORDERS = [4,10,20]
 
-PLOTDIR = os.path.join(os.path.dirname(__file__), 'plots')
+PLOTDIR = os.path.join(os.path.dirname(__file__), '..', 'ml_corrector', 'plots')
 
 # ===
 # MAIN
@@ -162,7 +162,7 @@ def main():
         trunc = {k: v for k, v in coeffs.items() if sum(k) <= N}
         compare_coeffs.append(trunc)
         n_trunc = len(trunc)
-        from hermite_ml.adaptive_hermite import parseval_check, log_eps_check
+        from data_processing.adaptive_hermite import parseval_check, log_eps_check
         eps_f   = parseval_check(cube, trunc, 2 * vlim / vlen)
         eps_lg  = log_eps_check(cube, trunc, vlim, vlen, vth, u,
                                  sp_th=SP_TH, sparse_mask=sparse_mask)

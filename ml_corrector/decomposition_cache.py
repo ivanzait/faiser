@@ -26,9 +26,11 @@ Usage
 """
 
 import os
+import sys
 import numpy as np
 
-from hermite_ml.adaptive_hermite import (adaptive_transform, reconstruct,
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from data_processing.adaptive_hermite import (adaptive_transform, reconstruct,
                                          coeffs_to_array, array_to_coeffs)
 
 

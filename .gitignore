@@ -9,12 +9,12 @@ reconnection_2d/
 reconnection_2d_beta02/
 
 # Expensive per-cell decomposition caches and built training datasets
-# (regenerate locally with data_processing.py -- see README)
-hermite_ml/data/
-hermite_ml/datasets/
-hermite_ml/checkpoints/
+# (regenerate locally with scripts/build_dataset.py -- see README)
+ml_corrector/data/
+ml_corrector/datasets/
+ml_corrector/checkpoints/
 *.npz
 
-# Generated diagnostic plots (regenerate with run_diagnostic.py /
-# make_feature_figures.py -- a curated subset is committed under docs/figures/)
-hermite_ml/plots/
+# Generated diagnostic plots (regenerate with scripts/run_diagnostic.py /
+# scripts/make_feature_figures.py -- a curated subset is committed under docs/figures/)
+ml_corrector/plots/

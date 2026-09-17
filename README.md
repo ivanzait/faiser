@@ -15,18 +15,22 @@ already-computed quantities from the decomposition itself.
 
 See [`docs/hermite_corrector_presentation.pdf`](docs/hermite_corrector_presentation.pdf)
 for a full walkthrough with figures, and
-[`hermite_ml/EXPERIMENT_LOG.md`](hermite_ml/EXPERIMENT_LOG.md) for the
+[`ml_corrector/EXPERIMENT_LOG.md`](ml_corrector/EXPERIMENT_LOG.md) for the
 complete experimental log (including approaches that didn't work).
 
 ## Method
 
-**Reconstruction.** `vdf_tools.py` reads a Vlasiator VDF into a dense
-velocity-space cube and computes an adaptive tetrahedral Hermite
-decomposition (`hermite_ml/adaptive_hermite.py`) up to a configurable
-maximum order, tracking both a cheap f-space error (`eps_rel`, via
-Parseval) and an honest log-space RMS error (`eps_log`).
+**Reconstruction.** `data_processing/` holds the core VDF/Hermite
+primitives, kept separate from the ML-specific code so it can be shared
+with (and stay compatible with) other tools working on the same
+decomposition. `vdf_tools.py` reads a Vlasiator VDF into a dense
+velocity-space cube; `adaptive_hermite.py` computes an adaptive
+tetrahedral Hermite decomposition up to a configurable maximum order,
+tracking both a cheap f-space error (`eps_rel`, via Parseval) and an
+honest log-space RMS error (`eps_log`).
 
-**Correction.** The MLP corrector (`hermite_ml/corrector_model.py`)
+**Correction.** Everything specific to the ML safeguard lives in
+`ml_corrector/`. The MLP corrector (`ml_corrector/corrector_model.py`)
 predicts a delta correction applied multiplicatively in log-space:
 
 ```
@@ -65,13 +69,17 @@ data is therefore treated as required, not optional.
 ## Repository layout
 
 ```
-vdf_tools.py                     # VDF cube extraction, drift/thermal velocity, sparsity threshold
-hermite_ml/
+data_processing/                 # core library: colleague-compatible, no ML dependency
+  vdf_tools.py                   # VDF cube extraction, drift/thermal velocity, sparsity threshold
   adaptive_hermite.py            # tetrahedral Hermite transform + reconstruction
+ml_corrector/                    # ML-corrector library
   corrector_model.py             # the MLP, feature helpers (axis spectra, patches)
   decomposition_cache.py         # disk cache for the expensive full decomposition
-  data_processing.py             # parallel (multiprocessing), multi-timestep dataset builder
-  run_data_processing.sh         # config wrapper around data_processing.py
+  EXPERIMENT_LOG.md              # full experimental log
+  corrector_weights.pt           # example pretrained checkpoint (multi-snapshot training)
+scripts/                         # all runnable entry points (import from the two folders above)
+  build_dataset.py               # parallel (multiprocessing), multi-timestep dataset builder
+  build_dataset.sh               # config wrapper around build_dataset.py
   corrector_train.py             # trains the MLP from a prebuilt dataset
   corrector_eval.py              # within-snapshot held-out evaluation + before/after plots
   corrector_validate.py          # cross-timestep evaluation on an entirely unseen bulk file
@@ -79,13 +87,18 @@ hermite_ml/
   run_random_cells.py            # adaptive-order convergence sweep over random cells
   make_feature_figures.py        # regenerates the low-S / spectra / patch illustration figures
   make_presentation.py           # assembles docs/hermite_corrector_presentation.pdf
-  EXPERIMENT_LOG.md              # full experimental log
-  corrector_weights.pt           # example pretrained checkpoint (multi-snapshot training)
 docs/
   hermite_corrector_presentation.pdf
   PROJECT_PLAN.md                # original design doc (partly superseded by EXPERIMENT_LOG.md)
   figures/                       # a curated subset of generated plots, used above
 ```
+
+`data_processing/` is meant to stay a self-contained, minimal core (VDF
+extraction + the Hermite transform itself) that other tools — including a
+colleague's code operating on the same decomposition — can depend on
+without pulling in PyTorch or any ML-corrector-specific logic.
+`ml_corrector/` and `scripts/` both depend on `data_processing/`, never
+the other way around.
 
 ## Setup
 
@@ -98,23 +111,26 @@ You will also need [analysator](https://github.com/fmihpc/analysator)
 Vlasiator `bulk.*.vlsv` files from a reconnection run. Neither is included
 in this repository. By default the scripts expect bulk files under
 `reconnection_2d_beta025/` at the repo root (edit `BULKDIR` / `--bulkdir`
-to point elsewhere).
+to point elsewhere). Generated caches, datasets and plots are written
+under `ml_corrector/{data,datasets,plots}/` and are gitignored.
 
 ## Usage
 
 ```bash
 # 1. Build a training dataset (parallel decomposition + feature extraction).
 #    Edit the config block at the top of the script first.
-bash hermite_ml/run_data_processing.sh
+bash scripts/build_dataset.sh
 
 # 2. Train the corrector (always smoke-test on a few epochs first).
-python3 hermite_ml/corrector_train.py
+python3 scripts/corrector_train.py
 
 # 3. Evaluate: held-out cells of the training snapshot(s) ...
-python3 hermite_ml/corrector_eval.py
+python3 scripts/corrector_eval.py
 # ... and on an entirely unseen timestep.
-python3 hermite_ml/corrector_validate.py
+python3 scripts/corrector_validate.py
 ```
+
+All scripts under `scripts/` are meant to be run from the repo root.
 
 ## Example results
 

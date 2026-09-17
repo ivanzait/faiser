@@ -14,7 +14,7 @@ Two-stage pipeline per bulk file:
      C_low, axis_spectra, per-cell adaptive lambda -- serial, reusing the
      now-complete decomposition cache.
 
-Validation split strategy -- see EXPERIMENT_LOG.md's cross-timestep test:
+Validation split strategy -- see ml_corrector/EXPERIMENT_LOG.md's cross-timestep test:
 splitting by CELL within one snapshot (Exp 1-10) only measures
 within-snapshot generalization and hid a real overfitting problem (the
 model scored 62% held-out within its training snapshot but -28% on an
@@ -27,14 +27,14 @@ stopping diagnostics -- kept separate from the true cross-timestep val.)
 
 Usage
 -----
-python3 hermite_ml/data_processing.py \
+python3 scripts/build_dataset.py \
     --train-bulkfiles bulk.0000024.vlsv bulk.0000050.vlsv bulk.0000080.vlsv \
     --val-bulkfiles bulk.0000111.vlsv \
     --n-workers 8 \
     --output-name multi_snapshot_v1
 
 Or via the wrapper (edit config at the top of the script):
-    bash hermite_ml/run_data_processing.sh
+    bash scripts/build_dataset.sh
 """
 
 import argparse, os, sys, time
@@ -42,13 +42,13 @@ import multiprocessing as mp
 import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-from vdf_tools import (get_vdf_parameters, build_cube, get_drift_velocity_cube,
+from data_processing.vdf_tools import (get_vdf_parameters, build_cube, get_drift_velocity_cube,
                        get_thermal_velocity_cube, get_sparse_threshold, velocity_axis)
-from hermite_ml.corrector_model import (coeffs_dict_to_vector, pad_field, extract_patches,
+from ml_corrector.corrector_model import (coeffs_dict_to_vector, pad_field, extract_patches,
                                         axis_spectra)
-from hermite_ml.adaptive_hermite import (adaptive_transform, reconstruct,
+from data_processing.adaptive_hermite import (adaptive_transform, reconstruct,
                                          coeffs_to_array, array_to_coeffs)
-from hermite_ml.decomposition_cache import cache_path_for, load_cache, save_cache
+from ml_corrector.decomposition_cache import cache_path_for, load_cache, save_cache
 
 
 # ===
@@ -283,7 +283,7 @@ def main():
         print(f"WARNING: bulkfiles in both train and val: {overlap} -- "
               f"this defeats the cross-timestep validation purpose.")
 
-    out_dir = os.path.join(os.path.dirname(__file__), 'datasets', args.output_name)
+    out_dir = os.path.join(os.path.dirname(__file__), '..', 'ml_corrector', 'datasets', args.output_name)
     os.makedirs(out_dir, exist_ok=True)
 
     print(f"=== Building TRAIN split from {args.train_bulkfiles} ===")

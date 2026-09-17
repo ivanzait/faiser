@@ -5,7 +5,7 @@ eps_rel behave across the domain.
 
 Usage
 -----
-python3 hermite_ml/run_random_cells.py   # run from the repo root
+python3 scripts/run_random_cells.py   # run from the repo root
 """
 
 import os, sys
@@ -13,10 +13,10 @@ import numpy as np
 import pytools as pt
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-from vdf_tools import (get_vdf_parameters, build_cube,
+from data_processing.vdf_tools import (get_vdf_parameters, build_cube,
                        get_drift_velocity_cube, get_thermal_velocity_cube,
                        get_sparse_threshold)
-from hermite_ml.adaptive_hermite import adaptive_transform, total_coeffs
+from data_processing.adaptive_hermite import adaptive_transform, total_coeffs
 
 # ===
 # CONFIG

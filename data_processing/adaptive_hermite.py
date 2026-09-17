@@ -32,12 +32,8 @@ Two eps metrics, tracked at every level in `history` as
 
 import math
 import numpy as np
-import sys
-import os
 
-# path: import vdf_tools from parent dir
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-from vdf_tools import hermite_basis, to_log_shifted, from_log_shifted, velocity_axis
+from .vdf_tools import hermite_basis, to_log_shifted, from_log_shifted, velocity_axis
 
 
 # ---

@@ -7,7 +7,7 @@ strongly non-Maxwellian), reusing the already-cached full decomposition.
 
 Usage
 -----
-python3 hermite_ml/make_feature_figures.py
+python3 scripts/make_feature_figures.py
 """
 import os, sys
 import numpy as np
@@ -17,11 +17,11 @@ import matplotlib.pyplot as plt
 import pytools as pt
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-from vdf_tools import (get_vdf_parameters, build_cube, get_drift_velocity_cube,
+from data_processing.vdf_tools import (get_vdf_parameters, build_cube, get_drift_velocity_cube,
                        get_thermal_velocity_cube, get_sparse_threshold, velocity_axis)
-from hermite_ml.adaptive_hermite import array_to_coeffs
-from hermite_ml.decomposition_cache import cache_path_for, load_cache
-from hermite_ml.corrector_model import (coeffs_dict_to_vector, axis_spectra,
+from data_processing.adaptive_hermite import array_to_coeffs
+from ml_corrector.decomposition_cache import cache_path_for, load_cache
+from ml_corrector.corrector_model import (coeffs_dict_to_vector, axis_spectra,
                                         pad_field, extract_patches)
 
 BULKDIR   = 'reconnection_2d_beta025'
@@ -30,7 +30,7 @@ FULL_ORDER = 22
 S_LOW = 2
 CID_LOBE = 16     # near-Maxwellian, far from current sheet
 CID_SHEET = 672   # current-sheet center, strongly non-Maxwellian
-PLOTDIR = os.path.join(os.path.dirname(__file__), 'plots')
+PLOTDIR = os.path.join(os.path.dirname(__file__), '..', 'ml_corrector', 'plots')
 
 
 def main():

@@ -16,8 +16,8 @@ from matplotlib.colors import LogNorm, SymLogNorm
 import sys, os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-from vdf_tools import to_log_shifted, velocity_axis
-from hermite_ml.adaptive_hermite import reconstruct
+from data_processing.vdf_tools import to_log_shifted, velocity_axis
+from data_processing.adaptive_hermite import reconstruct
 
 
 # ---
