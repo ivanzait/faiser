@@ -1,0 +1,20 @@
+__pycache__/
+*.pyc
+*.swp
+
+# Vlasiator bulk files / simulation output are not part of this repo
+*.vlsv
+reconnection_2d_beta025/
+reconnection_2d/
+reconnection_2d_beta02/
+
+# Expensive per-cell decomposition caches and built training datasets
+# (regenerate locally with data_processing.py -- see README)
+hermite_ml/data/
+hermite_ml/datasets/
+hermite_ml/checkpoints/
+*.npz
+
+# Generated diagnostic plots (regenerate with run_diagnostic.py /
+# make_feature_figures.py -- a curated subset is committed under docs/figures/)
+hermite_ml/plots/

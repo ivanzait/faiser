@@ -1,0 +1,7 @@
+numpy
+torch
+matplotlib
+
+# Also required, not on PyPI -- install from source:
+#   https://github.com/fmihpc/analysator
+# (imported in this codebase as `import pytools as pt`, its legacy name)
