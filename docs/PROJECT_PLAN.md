@@ -322,7 +322,7 @@ def compute_hermite_level(log_cube, s, vlim, vlen, vth, u):
 ## 8. File Structure
 
 ```
-hermite-corrector/
+faiser/
 ├── hermite_plan.md              ← this file
 ├── vdf_tools.py                 ← (patched: dvx from file)
 ├── znet.py                      ← (patched: bias update fix)
