@@ -56,29 +56,19 @@ def velocity_axis(vlim, vlen, dv):
     NOT match the actual grid cell centers (spacing dv=2*vlim/vlen) that
     build_cube used to bin the VDF. This off-by-one caused the discrete
     Hermite basis functions to be evaluated at the wrong points, breaking
-    their normalization: sum(phi_n^2)*dv == (vlen-1)/vlen instead of 1
-    (verified: 59/60 = 0.983333 at vlen=60, cubed = 0.9508 in 3D -- this
-    exactly explains the "eps floor ~0.22" seen throughout early Hermite
-    transform testing, which was NOT a Gibbs/sparse-boundary effect at all).
+    their normalization
     """
+    
     return -vlim + dv / 2.0 + np.arange(vlen) * dv
 
 
 def get_sparse_threshold(reader, pop="proton"):
-    """
-    Read the actual sparsity threshold (sp_th) used by the simulation from
-    the VLSV file's config, instead of hardcoding it. Do NOT assume 1e-15 --
-    it was found to be 1e-14 for the reconnection_2d_beta025 run, a real 10x
-    discrepancy that silently mislabeled cells in the (1e-15, 1e-14) range
-    as "real signal" when the simulation itself already zeroed them.
-    """
     cfg = reader.get_config()
     return float(cfg[f'{pop}_sparse']['minValue'][0])
 
 
 def build_cube(cellid, reader, vlim, vlen, dv):
     """
-    Extract VDF for a given cell and arrange into a (vlen, vlen, vlen) array.
     cube[iz, iy, ix] convention.
     """
     vdf = reader.read_velocity_cells(cellid, "proton")
@@ -103,6 +93,17 @@ def build_cube(cellid, reader, vlim, vlen, dv):
 ################################
 ######## HERMITE TOOLS #########
 ################################
+
+def run_hermite(cellid, reader, vlim, vlen, dv, order, sp_th, outdir):
+    cube = build_cube(cellid, reader, vlim, vlen, dv)
+    u    = get_drift_velocity_cube(cube, vlim, vlen)
+    vth  = get_thermal_velocity_cube(cube, vlim, vlen, u)
+
+    log_cube     = to_log_shifted(cube, sp_th)
+    hermite_cube = get_hermite_spectra_cube(log_cube, vlim, vlen, order, vth, u)
+    
+    return hermite_cube, u, vth
+
 
 def hermite_basis(v_ax, order, vth, u):
     """
@@ -173,6 +174,9 @@ def reconstruct_vdf_cube(spectra, vlim, vlen, order, vth, u):
     return cube
 
 
+
+
+
 def reconstruct_vdf_cube_nolip(spectra, vlim, vlen, order, vth, u):
     """Reconstruct log_cube from spectra, no clipping."""
     dv   = 2 * vlim / vlen
@@ -214,6 +218,7 @@ def run_hermite_and_save(cellid, reader, vlim, vlen, dv, order, sp_th, outdir):
         cube=cube, hermite_coeffs=hermite_cube,
         u=u, vth=vth, vlim=vlim, vlen=vlen, order=order, sp_th=sp_th,
     )
+    
     return hermite_cube, u, vth
 
 
