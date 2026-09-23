@@ -31,9 +31,11 @@ Two eps metrics, tracked at every level in `history` as
 """
 
 import math
+import time
 import numpy as np
 
-from .vdf_tools import hermite_basis, to_log_shifted, from_log_shifted, velocity_axis
+from vdf_tools import hermite_basis, to_log_shifted, from_log_shifted, velocity_axis
+
 
 
 # ---
@@ -155,7 +157,8 @@ def adaptive_transform(log_cube, vlim, vlen, vth, u,
                        sp_th=1e-15,
                        sparse_mask=None,
                        track_log_eps=True,
-                       verbose=False):
+                       verbose=False,
+                       timing=None):
     """
     Hermite transform, level by level s=0,1,2,...
 
@@ -214,6 +217,9 @@ def adaptive_transform(log_cube, vlim, vlen, vth, u,
                     downstream reconstruct() call) -- history then reports
                     eps_log=None for every level.
     verbose       : bool    print per-level progress
+    timing        : dict, optional
+                    if given, filled in-place with wall-clock timings (seconds):
+                    'basis' (precompute), 'levels' (per-s list), 'total'.
 
     Returns
     -------
@@ -222,20 +228,26 @@ def adaptive_transform(log_cube, vlim, vlen, vth, u,
     s_stop  : int    total order at which computation stopped
     history : list of (s, parity, eps_rel, eps_log, n_new_coeffs)
     """
+    t_start = time.perf_counter()
     dv   = 2.0 * vlim / vlen
     v_ax = velocity_axis(vlim, vlen, dv)
 
     P_total = _parseval_total(log_cube, dv)
     if P_total < 1e-30:
         # essentially zero VDF -- nothing to decompose
+        if timing is not None:
+            timing.update(basis=0.0, levels=[], total=time.perf_counter() - t_start)
         return {}, 0.0, 0, []
 
     # Precompute all basis functions up to max_order -- reused at every level
+    t_basis = time.perf_counter()
     Hx, Hy, Hz = _precompute_basis(v_ax, max_order, vth, u)
+    t_basis = time.perf_counter() - t_basis
 
     coeffs      = {}
     P_accum     = 0.0
     history     = []
+    level_times = []
     eps_rel     = 1.0
     eps_log     = (_log_eps(log_cube, np.zeros_like(log_cube), sp_th, sparse_mask)
                    if track_log_eps else None)
@@ -243,6 +255,7 @@ def adaptive_transform(log_cube, vlim, vlen, vth, u,
 
     def _process_level(s):
         nonlocal P_accum, eps_rel, eps_log, f_rec_accum
+        t0 = time.perf_counter()
         new_c, lp = _compute_level(log_cube, s, Hx, Hy, Hz, dv)
         coeffs.update(new_c)
         P_accum  += lp
@@ -252,6 +265,7 @@ def adaptive_transform(log_cube, vlim, vlen, vth, u,
             f_rec_accum += _level_field(new_c, Hx, Hy, Hz, dv, vlen)
             eps_log      = _log_eps(log_cube, f_rec_accum, sp_th, sparse_mask)
 
+        level_times.append((s, time.perf_counter() - t0))
         parity = 'even' if s % 2 == 0 else 'odd'
         history.append((s, parity, eps_rel, eps_log, len(new_c)))
         if verbose:
@@ -260,25 +274,48 @@ def adaptive_transform(log_cube, vlim, vlen, vth, u,
         return rel_threshold is not None and eps_rel < rel_threshold
 
     s_stop = max_order
-    if even_first:
-        for s in range(0, max_order + 1, 2):
-            if _process_level(s):
-                s_stop = s
-                return coeffs, eps_rel, s_stop, history
-        for s in range(1, max_order + 1, 2):
-            if _process_level(s):
-                s_stop = s
-                return coeffs, eps_rel, s_stop, history
-    else:
-        for s in range(max_order + 1):
-            if _process_level(s):
-                s_stop = s
-                return coeffs, eps_rel, s_stop, history
+    try:
+        if even_first:
+            for s in range(0, max_order + 1, 2):
+                if _process_level(s):
+                    s_stop = s
+                    return coeffs, eps_rel, s_stop, history
+            for s in range(1, max_order + 1, 2):
+                if _process_level(s):
+                    s_stop = s
+                    return coeffs, eps_rel, s_stop, history
+        else:
+            for s in range(max_order + 1):
+                if _process_level(s):
+                    s_stop = s
+                    return coeffs, eps_rel, s_stop, history
 
-    if verbose:
-        print(f"[adaptive_hermite] Computed s=0..{max_order}, "
-              f"final eps_rel={eps_rel:.5f}  final eps_log={eps_log:.5f}")
-    return coeffs, eps_rel, s_stop, history
+        if verbose:
+            print(f"[adaptive_hermite] Computed s=0..{max_order}, "
+                  f"final eps_rel={eps_rel:.5f}  final eps_log={eps_log:.5f}")
+        return coeffs, eps_rel, s_stop, history
+    finally:
+        if timing is not None:
+            timing.update(basis=t_basis, levels=level_times,
+                          total=time.perf_counter() - t_start)
+
+
+
+def coeffs_into_cube(coeffs, hermite_order):
+    h_cube =  np.zeros([hermite_order,hermite_order,hermite_order])  
+    for k, v in coeffs.items():
+        h_cube[k] = v
+    return h_cube
+
+        
+def plot_hcube(h_cube, save_path):
+    import matplotlib.pyplot as plt
+    fig, ax = plt.subplots()
+    ax.imshow(np.sum(h_cube, axis=1))
+    fig.savefig(save_path)
+    print('saved fig')
+    plt.close(fig)    
+
 
 
 def reconstruct(coeffs, vlim, vlen, vth, u,
@@ -341,7 +378,7 @@ def reconstruct(coeffs, vlim, vlen, vth, u,
     return log_rec.astype(np.float32)
 
 
-def cubic_transform(data, vlim, vlen, vth, u, N):
+def cubic_transform(data, vlim, vlen, vth, u, N, timing=None):
     """
     Full cubic Hermite transform: all C[l,m,n] with l,m,n < N.
 
@@ -352,6 +389,9 @@ def cubic_transform(data, vlim, vlen, vth, u, N):
     ----------
     data  : ndarray (vlen,vlen,vlen)  input (f or log_cube)
     N     : int  order per axis  (total coefficients: N^3)
+    timing : dict, optional
+             if given, filled in-place with wall-clock timings (seconds):
+             'basis' (precompute), 'einsum', 'total'.
 
     Returns
     -------
@@ -359,16 +399,21 @@ def cubic_transform(data, vlim, vlen, vth, u, N):
     eps_rel : float
     history : list of (N_used, n_coeffs, eps_rel)  -- cumulative by cubic shell
     """
+    t_start = time.perf_counter()
     dv   = 2.0 * vlim / vlen
     v_ax = velocity_axis(vlim, vlen, dv)
 
+    t_basis = time.perf_counter()
     Hx = hermite_basis(v_ax, N, vth, u[0])   # (N, vlen)
     Hy = hermite_basis(v_ax, N, vth, u[1])
     Hz = hermite_basis(v_ax, N, vth, u[2])
+    t_basis = time.perf_counter() - t_basis
 
     # single batch einsum: C[l,m,n] = sum_{z,y,x} data[z,y,x]*Hz[l,z]*Hy[m,y]*Hx[n,x] * dv^3
     # (dv^3 = Riemann-sum cell volume, same convention as _compute_level/reconstruct)
+    t_einsum = time.perf_counter()
     C_arr = np.einsum('zyx,lz,my,nx->lmn', data, Hz, Hy, Hx) * dv ** 3
+    t_einsum = time.perf_counter() - t_einsum
 
     P_total = float(np.sum(data ** 2)) * dv ** 3
     coeffs  = {}
@@ -392,6 +437,9 @@ def cubic_transform(data, vlim, vlen, vth, u, N):
                 coeffs[(l, m, n)] = float(C_arr[l, m, n])
 
     eps_rel = history[-1][2]
+    if timing is not None:
+        timing.update(basis=t_basis, einsum=t_einsum,
+                      total=time.perf_counter() - t_start)
     return coeffs, eps_rel, history
 
 

@@ -46,6 +46,34 @@ def get_vdf_parameters(reader):
     return vlim, vlen, dv
 
 
+def get_cellid_at_coords(reader, coords=None):
+    """
+    Return the spatial cellid at given [x, y, z] coordinates.
+    If coords is None, uses the center of the simulation box.
+    """
+    if coords is None:
+        xmin, ymin, zmin, xmax, ymax, zmax = reader.get_spatial_mesh_extent()
+        coords = [(xmin + xmax) / 2, (ymin + ymax) / 2, (zmin + zmax) / 2]
+    return int(reader.get_cellid(coords))
+
+
+def get_nearest_vdf_cellid(reader, coords=None, pop="proton"):
+    """
+    Return the cellid with a stored VDF closest to given [x, y, z]
+    coordinates. If coords is None, uses the center of the simulation box.
+    """
+    if coords is None:
+        xmin, ymin, zmin, xmax, ymax, zmax = reader.get_spatial_mesh_extent()
+        coords = [(xmin + xmax) / 2, (ymin + ymax) / 2, (zmin + zmax) / 2]
+    coords = np.asarray(coords, dtype=float)
+
+    cids_w_vdf = np.atleast_1d(reader.read(mesh="SpatialGrid", tag="CELLSWITHBLOCKS", name=pop))
+    vdf_coords = reader.get_cell_coordinates(cids_w_vdf)
+    dist2 = np.sum((vdf_coords - coords[np.newaxis, :]) ** 2, axis=1)
+    nearest = int(cids_w_vdf[np.argmin(dist2)])
+    return nearest
+
+
 def velocity_axis(vlim, vlen, dv):
     """
     Cell-CENTER velocity axis, consistent with build_cube's binning
@@ -99,8 +127,9 @@ def run_hermite(cellid, reader, vlim, vlen, dv, order, sp_th, outdir):
     u    = get_drift_velocity_cube(cube, vlim, vlen)
     vth  = get_thermal_velocity_cube(cube, vlim, vlen, u)
 
-    log_cube     = to_log_shifted(cube, sp_th)
-    hermite_cube = get_hermite_spectra_cube(log_cube, vlim, vlen, order, vth, u)
+    #log_cube     = to_log_shifted(cube, sp_th)
+    
+    hermite_cube = get_hermite_spectra_cube(cube, vlim, vlen, order, vth, u)
     
     return hermite_cube, u, vth
 

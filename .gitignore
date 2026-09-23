@@ -18,3 +18,5 @@ ml_corrector/checkpoints/
 # Generated diagnostic plots (regenerate with scripts/run_diagnostic.py /
 # scripts/make_feature_figures.py -- a curated subset is committed under docs/figures/)
 ml_corrector/plots/
+
+.atl
