@@ -367,13 +367,19 @@ def _level_power(new_c, Hx, Hy, Hz, dv, vlen):
         field += c * np.einsum('x,y,z->zyx', Hx[n], Hy[m], Hz[l])
     return field
 
-def _parseval_total(log_cube, dv):
-    """ Total Parseval power from the raw vdf -- O(vlen^3), computed once. """
-    return float(np.sum(log_cube ** 2)) * dv ** 3
-
-def _parseval_delta(P_accum, P_total):
-    """Relative L2 residual: sqrt(1 - P_accum/P_total)."""
-    return math.sqrt(max(0.0, 1.0 - P_accum / P_total))
+# Parseval-based stopping metric -- kept for reference / future diagnostics,
+# but NOT used to gate adaptive_transform: linear L2 power is dominated by
+# the core of the distribution, so a fit can satisfy a tight Parseval
+# tolerance while the (much lower-amplitude) tails are still unresolved.
+# _log_delta below is what actually gates the loop.
+#
+# def _parseval_total(log_cube, dv):
+#     """ Total Parseval power from the raw vdf -- O(vlen^3), computed once. """
+#     return float(np.sum(log_cube ** 2)) * dv ** 3
+#
+# def _parseval_delta(P_accum, P_total):
+#     """Relative L2 residual: sqrt(1 - P_accum/P_total)."""
+#     return math.sqrt(max(0.0, 1.0 - P_accum / P_total))
 
 def _log_delta(cube, f_rec_accum, sp_th):
     """
@@ -388,41 +394,49 @@ def _log_delta(cube, f_rec_accum, sp_th):
 
 
 def adaptive_transform(vdf, vlim, vlen, vth, u,
-                       max_order=14,                                              
-                       sp_th=1e-15,                 
-                       tolerance=1e-5,    
+                       max_order=14,
+                       sp_th=1e-15,
+                       tolerance=0.15,
                        ):
-    
+    """
+    Add Hermite harmonics level by level (l+m+n = s = 0, 1, 2, ...) and stop
+    as soon as the log-space reconstruction error (_log_delta) drops below
+    `tolerance`. Log-space is used -- not linear Parseval power -- because
+    the tails of the VDF are physically meaningful but orders of magnitude
+    smaller in amplitude than the core, so a linear power criterion would
+    already look "converged" while the tails are still unresolved.
+
+    `tolerance=0.15` is a reasonable general-purpose default for the RMS
+    log-residual (roughly: reconstructed density within ~15% in log-space
+    almost everywhere down to the `sp_th` floor); tune per-application if
+    you need tighter tail fidelity. See scripts/test_adaptive.py for a
+    synthetic-VDF sweep of tolerance vs. s_stop / accuracy.
+    """
     dv   = 2.0 * vlim / vlen
     v_ax = velocity_axis(vlim, vlen, dv)
-    P_total = _parseval_total(vdf, dv) ### USING PARSEVAL THEOREM FOR CHECK THE ACCURACY ON THE CERTAIN HARMONIC
 
-    # Precompute all basis functions 
+    # Precompute all basis functions
     Hx = hermite_basis(v_ax, max_order , vth, u[0])
     Hy = hermite_basis(v_ax, max_order , vth, u[1])
     Hz = hermite_basis(v_ax, max_order , vth, u[2])
 
-    coeffs      = {}
-    P_accum     = 0.0    
-    delta_rel     = 1.0
+    coeffs        = {}
     log_delta     = _log_delta(vdf, np.zeros_like(vdf), sp_th)
-    current_power = np.zeros((vlen, vlen, vlen), dtype=np.float64) 
+    current_power = np.zeros((vlen, vlen, vlen), dtype=np.float64)
 
     def _process_level(s):
-        nonlocal P_accum, delta_rel, log_delta, current_power        
-        new_c, lp = _compute_level(vdf, s, Hx, Hy, Hz, dv)
+        nonlocal log_delta, current_power
+        new_c, _lp = _compute_level(vdf, s, Hx, Hy, Hz, dv)
         coeffs.update(new_c)
-        P_accum  += lp
-        delta_rel   = _parseval_delta(P_accum, P_total)        
         current_power += _level_power(new_c, Hx, Hy, Hz, dv, vlen)
-        discrepancy   =  _log_delta(vdf, current_power, sp_th)            
-        return discrepancy < tolerance
+        log_delta = _log_delta(vdf, current_power, sp_th)
+        return log_delta < tolerance
 
     s_stop = max_order - 1
     for s in range(max_order):
         if _process_level(s):
             s_stop = s
             return coeffs, s_stop
-        
+
     return coeffs, s_stop
 
