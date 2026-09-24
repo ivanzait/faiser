@@ -44,18 +44,12 @@ for cellid in [target_cellid]:
     print('cube shape:', cube.shape)
     ### cube transform
     # hermite_cube, u, vth = vt.run_hermite(cellid, reader, vlim, vlen, dv, HN, SP_TH, outdir)
-    
-    
+        
     ### tetrahedral transform
     u = vt.get_drift_velocity_cube(cube, vlim, vlen)
     vth = vt.get_thermal_velocity_cube(cube, vlim, vlen, u)
-    # max_order is the TOTAL order s=l+m+n, not a per-axis cap -- a single
-    # index can reach max_order itself (other two zero). To match the cubic
-    # convention (order=HN -> indices 0..HN-1), cap total order at HN-1.
-    coeffs, eps_rel, s_stop, history = adaptive_transform( cube, vlim, vlen, vth, u, max_order=HN , rel_threshold=0.03, even_first=False, sp_th=SP_TH, sparse_mask=None,
-                                                            track_log_eps=True,verbose=False)
-
-    h_cube = coeffs_into_cube(coeffs, HN)  # indices l,m,n run 0..HN-1, matching cubic order=HN
+    hermite_coeffs, s_stop = vt.adaptive_transform( cube, vlim, vlen, vth, u, max_order=HN)
+    h_cube = coeffs_into_cube(hermite_coeffs, HN)  # indices l,m,n run 0..HN-1, matching cubic order=HN
         
     coords = reader.get_cell_coordinates(cellid)
     vdf_ar.append(cube)
