@@ -330,3 +330,99 @@ def plot_vdf_reconstruction(cube, cube_rec, vlim, vlen, sp_th):
     fig.tight_layout()
     fig.savefig("vdf_reconstruction.png", dpi=300)
     plt.close(fig)
+
+
+#################################
+####### ADAPTIVE ALGO ###########
+#################################
+
+def _compute_level(vdf, s, Hx, Hy, Hz, dv):
+    """
+    Compute all Hermite coefficients C[l,m,n] with l+m+n == s.
+    Number of (l,m,n) triples at level s: (s+1)(s+2)/2.
+    Each coefficient is an O(vlen^3) inner product -- but precomputed basis
+    vectors mean we only do the contraction, not the basis construction.
+    Returns:
+        new_coeffs  : dict {(l,m,n): float}
+        level_power : sum C[l,m,n]^2 -- added to the running Parseval sum
+    """
+    new_coeffs = {}
+    level_power = 0.0
+    dv_vol = dv ** 3   
+    # cube axes convention cube[iz, iy, ix]
+    # spectra convention:  C[l,m,n] contracts as z<->l, y<->m, x<->n
+    for l in range(s + 1):
+        for m in range(s + 1 - l):
+            n = s - l - m
+            # Inner product: C = sum f * Hz_l * Hy_m * Hx_n * dv^3  (Riemann sum)
+            c = float(np.einsum('zyx,x,y,z->', vdf,
+                                Hx[n], Hy[m], Hz[l]) * dv_vol)
+            new_coeffs[(l, m, n)] = c
+            level_power += c * c
+    return new_coeffs, level_power
+
+def _level_power(new_c, Hx, Hy, Hz, dv, vlen):
+    field = np.zeros((vlen, vlen, vlen), dtype=np.float64)
+    for (l, m, n), c in new_c.items():
+        field += c * np.einsum('x,y,z->zyx', Hx[n], Hy[m], Hz[l])
+    return field
+
+def _parseval_total(log_cube, dv):
+    """ Total Parseval power from the raw vdf -- O(vlen^3), computed once. """
+    return float(np.sum(log_cube ** 2)) * dv ** 3
+
+def _parseval_delta(P_accum, P_total):
+    """Relative L2 residual: sqrt(1 - P_accum/P_total)."""
+    return math.sqrt(max(0.0, 1.0 - P_accum / P_total))
+
+def _log_delta(cube, f_rec_accum, sp_th):
+    """
+    accuracy metric // log space to catch the tails
+    """
+    f_rec = f_rec_accum
+    # if sparse_mask is not None:
+    #     f_rec = np.where(sparse_mask, f_rec_accum, 0.0)
+    log_true = np.log(np.maximum(cube, sp_th))
+    log_rec  = np.log(np.maximum(f_rec, sp_th))
+    return float(np.sqrt(np.mean((log_true - log_rec) ** 2)))
+
+
+def adaptive_transform(vdf, vlim, vlen, vth, u,
+                       max_order=14,                                              
+                       sp_th=1e-15,                 
+                       tolerance=1e-5,    
+                       ):
+    
+    dv   = 2.0 * vlim / vlen
+    v_ax = velocity_axis(vlim, vlen, dv)
+    P_total = _parseval_total(vdf, dv) ### USING PARSEVAL THEOREM FOR CHECK THE ACCURACY ON THE CERTAIN HARMONIC
+
+    # Precompute all basis functions 
+    Hx = hermite_basis(v_ax, max_order , vth, u[0])
+    Hy = hermite_basis(v_ax, max_order , vth, u[1])
+    Hz = hermite_basis(v_ax, max_order , vth, u[2])
+
+    coeffs      = {}
+    P_accum     = 0.0    
+    delta_rel     = 1.0
+    log_delta     = _log_delta(vdf, np.zeros_like(vdf), sp_th)
+    current_power = np.zeros((vlen, vlen, vlen), dtype=np.float64) 
+
+    def _process_level(s):
+        nonlocal P_accum, delta_rel, log_delta, current_power        
+        new_c, lp = _compute_level(vdf, s, Hx, Hy, Hz, dv)
+        coeffs.update(new_c)
+        P_accum  += lp
+        delta_rel   = _parseval_delta(P_accum, P_total)        
+        current_power += _level_power(new_c, Hx, Hy, Hz, dv, vlen)
+        discrepancy   =  _log_delta(vdf, current_power, sp_th)            
+        return discrepancy < tolerance
+
+    s_stop = max_order - 1
+    for s in range(max_order):
+        if _process_level(s):
+            s_stop = s
+            return coeffs, s_stop
+        
+    return coeffs, s_stop
+

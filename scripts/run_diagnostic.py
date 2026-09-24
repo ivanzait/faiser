@@ -123,13 +123,17 @@ def main():
           f"coefficients used: {len(coeffs)}/{n_tot}")
 
     # 4b. Cubic transform comparison
+    # cubic_transform(N) and adaptive_transform(max_order) now share the same
+    # index convention: indices l,m,n and total order s all run 0..N-1 /
+    # 0..max_order-1. So calling cubic_transform with N=MAX_ORDER covers
+    # exactly the same index range as the tetrahedral run above.
     print(f"\n{'='*60}")
     print(f"Cubic transform comparison (N per axis, N^3 coefficients):")
-    print(f"  {'N':>4}  {'N^3':>6}  {'eps_cubic':>10}  |  tetra S=2N: {'n_tetra':>7}  eps_tetra(log)")
+    print(f"  {'N':>4}  {'N^3':>6}  {'eps_cubic':>10}  |  tetra s<=N-1: {'n_tetra':>7}  eps_tetra(log)")
     print("  " + "-"*60)
-    _, _, cubic_hist = cubic_transform(cube, vlim, vlen, vth, u, MAX_ORDER + 1)
+    _, _, cubic_hist = cubic_transform(cube, vlim, vlen, vth, u, MAX_ORDER)
     for n_max, n_coeffs, eps_c in cubic_hist:
-        # comparable tetrahedral: S = n_max-1 (same max per-axis order)
+        # comparable tetrahedral: same max per-axis order N-1 == total order s
         s_tetra = n_max - 1
         tetra_eps_entry = next(
             (el for s, p, er, el, n in history if s == s_tetra and p == 'even'), None)

@@ -15,7 +15,8 @@ Usage:
     coeffs, eps, s_stop, history = adaptive_transform(
         cube, vlim, vlen, vth, u,
         rel_threshold=0.01, max_order=22, even_first=False, verbose=True
-    )
+    )  # max_order=22 -> indices l,m,n and total order s all run 0..21,
+       # matching cubic_transform(..., N=22)
     f_rec = reconstruct(coeffs, vlim, vlen, vth, u)
 
 Two eps metrics, tracked at every level in `history` as
@@ -41,18 +42,6 @@ from vdf_tools import hermite_basis, to_log_shifted, from_log_shifted, velocity_
 # ---
 # Core helpers
 # ---
-
-def _precompute_basis(v_ax, max_order, vth, u):
-    """
-    Precompute Hermite basis functions for all three velocity axes.
-    Returned arrays have shape (max_order+1, vlen).
-    Computed ONCE and reused across all levels -- the dominant cost.
-    """
-    Hx = hermite_basis(v_ax, max_order + 1, vth, u[0])
-    Hy = hermite_basis(v_ax, max_order + 1, vth, u[1])
-    Hz = hermite_basis(v_ax, max_order + 1, vth, u[2])
-    return Hx, Hy, Hz
-
 
 def _compute_level(log_cube, s, Hx, Hy, Hz, dv):
     """
@@ -171,7 +160,7 @@ def adaptive_transform(log_cube, vlim, vlen, vth, u,
 
     rel_threshold : float or None
         If given, stop as soon as eps_rel < rel_threshold (checked after
-        every level). If None (default), compute all levels s=0..max_order.
+        every level). If None (default), compute all levels s=0..max_order-1.
 
     Two eps metrics are recorded at every level in `history`:
       eps_rel : f-space relative L2 error, sqrt(1 - P_accum/P_total). Free
@@ -193,7 +182,9 @@ def adaptive_transform(log_cube, vlim, vlen, vth, u,
     vlen          : int     number of velocity cells per axis
     vth           : float   thermal velocity [m/s]
     u             : array   bulk drift velocity [ux,uy,uz] [m/s]
-    max_order     : int     hard ceiling on total order s=l+m+n
+    max_order     : int     order per axis, matching cubic_transform's N --
+                            indices l,m,n and total order s=l+m+n all run
+                            0..max_order-1
     rel_threshold : float or None   stop when eps_rel < this (None = no stop)
     even_first    : bool    order in which levels are computed (even 0,2,4,...
                             then odd 1,3,5,... vs plain sequential); with
@@ -225,7 +216,8 @@ def adaptive_transform(log_cube, vlim, vlen, vth, u,
     -------
     coeffs  : dict {(l,m,n): float}  all computed coefficients
     eps_rel : float  final f-space relative L2 error achieved
-    s_stop  : int    total order at which computation stopped
+    s_stop  : int    total order at which computation stopped (max_order-1
+                     if rel_threshold was never crossed)
     history : list of (s, parity, eps_rel, eps_log, n_new_coeffs)
     """
     t_start = time.perf_counter()
@@ -239,9 +231,12 @@ def adaptive_transform(log_cube, vlim, vlen, vth, u,
             timing.update(basis=0.0, levels=[], total=time.perf_counter() - t_start)
         return {}, 0.0, 0, []
 
-    # Precompute all basis functions up to max_order -- reused at every level
+    # Precompute all basis functions up to max_order -- reused at every level.
+
     t_basis = time.perf_counter()
-    Hx, Hy, Hz = _precompute_basis(v_ax, max_order, vth, u)
+    Hx = hermite_basis(v_ax, max_order , vth, u[0])
+    Hy = hermite_basis(v_ax, max_order , vth, u[1])
+    Hz = hermite_basis(v_ax, max_order , vth, u[2])
     t_basis = time.perf_counter() - t_basis
 
     coeffs      = {}
@@ -273,25 +268,25 @@ def adaptive_transform(log_cube, vlim, vlen, vth, u,
                   f"eps_rel={eps_rel:.5f} | eps_log={eps_log:.5f}")
         return rel_threshold is not None and eps_rel < rel_threshold
 
-    s_stop = max_order
+    s_stop = max_order - 1
     try:
         if even_first:
-            for s in range(0, max_order + 1, 2):
+            for s in range(0, max_order, 2):
                 if _process_level(s):
                     s_stop = s
                     return coeffs, eps_rel, s_stop, history
-            for s in range(1, max_order + 1, 2):
+            for s in range(1, max_order, 2):
                 if _process_level(s):
                     s_stop = s
                     return coeffs, eps_rel, s_stop, history
         else:
-            for s in range(max_order + 1):
+            for s in range(max_order):
                 if _process_level(s):
                     s_stop = s
                     return coeffs, eps_rel, s_stop, history
 
         if verbose:
-            print(f"[adaptive_hermite] Computed s=0..{max_order}, "
+            print(f"[adaptive_hermite] Computed s=0..{max_order - 1}, "
                   f"final eps_rel={eps_rel:.5f}  final eps_log={eps_log:.5f}")
         return coeffs, eps_rel, s_stop, history
     finally:
@@ -302,7 +297,8 @@ def adaptive_transform(log_cube, vlim, vlen, vth, u,
 
 
 def coeffs_into_cube(coeffs, hermite_order):
-    h_cube =  np.zeros([hermite_order,hermite_order,hermite_order])  
+    """Dense (hermite_order, hermite_order, hermite_order) array; indices l,m,n run 0..hermite_order-1."""
+    h_cube = np.zeros([hermite_order, hermite_order, hermite_order])
     for k, v in coeffs.items():
         h_cube[k] = v
     return h_cube
@@ -351,7 +347,9 @@ def reconstruct(coeffs, vlim, vlen, vth, u,
     max_order = max(l + m + n for l, m, n in coeffs)
     dv   = 2.0 * vlim / vlen
     v_ax = velocity_axis(vlim, vlen, dv)
-    Hx, Hy, Hz = _precompute_basis(v_ax, max_order, vth, u)
+    Hx = hermite_basis(v_ax, max_order + 1, vth, u[0])
+    Hy = hermite_basis(v_ax, max_order + 1, vth, u[1])
+    Hz = hermite_basis(v_ax, max_order + 1, vth, u[2])
 
     log_rec = np.zeros((vlen, vlen, vlen), dtype=np.float64)
     for (l, m, n), c in coeffs.items():
@@ -469,12 +467,13 @@ def log_eps_check(cube, coeffs, vlim, vlen, vth, u, sp_th=1e-15, sparse_mask=Non
 def coeffs_to_array(coeffs, max_order):
     """
     Flatten coefficient dict to a 1-D numpy array, ordered by
-    level s=l+m+n then lexicographic (l,m,n).
-    Total length: (max_order+1)(max_order+2)(max_order+3)//6
+    level s=l+m+n then lexicographic (l,m,n). Covers s=0..max_order-1,
+    matching adaptive_transform's max_order convention.
+    Total length: max_order(max_order+1)(max_order+2)//6
     Coefficients absent from the dict are set to 0.
     """
     out = []
-    for s in range(max_order + 1):
+    for s in range(max_order):
         for l in range(s + 1):
             for m in range(s + 1 - l):
                 n = s - l - m
@@ -486,7 +485,7 @@ def array_to_coeffs(arr, max_order):
     """Inverse of coeffs_to_array."""
     coeffs = {}
     idx = 0
-    for s in range(max_order + 1):
+    for s in range(max_order):
         for l in range(s + 1):
             for m in range(s + 1 - l):
                 n = s - l - m
@@ -496,13 +495,13 @@ def array_to_coeffs(arr, max_order):
 
 
 def level_sizes(max_order):
-    """Return list of (s, n_coeffs_at_level_s) for s=0..max_order."""
-    return [(s, (s + 1) * (s + 2) // 2) for s in range(max_order + 1)]
+    """Return list of (s, n_coeffs_at_level_s) for s=0..max_order-1."""
+    return [(s, (s + 1) * (s + 2) // 2) for s in range(max_order)]
 
 
 def total_coeffs(max_order):
-    """Total number of coefficients up to max_order (tetrahedral number)."""
-    return (max_order + 1) * (max_order + 2) * (max_order + 3) // 6
+    """Total number of coefficients for s=0..max_order-1 (tetrahedral number)."""
+    return max_order * (max_order + 1) * (max_order + 2) // 6
 
 
 # Diagnostic entry point moved to hermite_ml/run_diagnostic.py
