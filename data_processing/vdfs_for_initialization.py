@@ -1,11 +1,12 @@
 import numpy as np
 import matplotlib.pyplot as plt
+import sys
+sys.path.insert(0, "/Users/ivanzait/Documents/Documents_LM4500/Codes/analysator")
 import pytools as pt
 import vdf_tools as vt
 from adaptive_hermite import adaptive_transform, coeffs_into_cube, plot_hcube
 
 #reader = pt.vlsvfile.VlsvReader("/wrk-vakka/group/spacephysics/vlasiator/2D/BIE/restart.0001125.2025-06-06_22-31-27.vlsv")
-
 #data_dir = "/scratch/project_2000203/zaitsevi/runs/reconnection_beta025_large"
 # outdir = "/scratch/project_2000203/zaitsevi/faiser/data_initialization"
 
@@ -23,13 +24,11 @@ hermite_ar = []
 v_mean_ar = [] ## hermite need mean (bulk) velocity
 v_th_ar = [] ## hermite also need thermal velocity
 
-#SP_TH = vt.get_sparse_threshold(reader, pop="proton") ## 1e-15 ## sparsity threshold
-SP_TH =  1e-15 ## sparsity threshold
+SP_TH = vt.get_sparse_threshold(reader, pop="proton") ## 1e-15 ## sparsity threshold
+#SP_TH =  1e-15 ## sparsity threshold
 HN = 20  # HERMITE ORDER
 
-
 # pick a single, complex VDF cell nearest to the center of the box to
-# stress-test the tetrahedral transform
 target_cellid = vt.get_nearest_vdf_cellid(reader, coords=[0,0,0])
 print('target cellid (nearest to box center with a stored VDF):', target_cellid)
 
