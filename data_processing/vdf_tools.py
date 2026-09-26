@@ -16,32 +16,13 @@ from matplotlib.colors import LogNorm
 ########  VDF READER  #########
 ################################
 
-def get_vdf_parameters(reader):
-    """
-    Read velocity mesh parameters from VLSV file.
-    Returns (vlim, vlen, dv) — symmetric mesh assumed.
-    """
+def get_vdf_parameters(reader):    
     extents = reader.get_velocity_mesh_size(pop="proton")
     nx = int(extents[0] * 4)
-    ny = int(extents[1] * 4)
-    nz = int(extents[2] * 4)
-
-    # Read actual velocity mesh extent from file — do NOT hardcode dv
-    vx_min, vy_min, vz_min, vx_max, vy_max, vz_max = \
-        reader.get_velocity_mesh_extent(pop="proton")
-
+    vx_min, vy_min, vz_min, vx_max, vy_max, vz_max = reader.get_velocity_mesh_extent(pop="proton")
     dvx = (vx_max - vx_min) / nx
-    dvy = (vy_max - vy_min) / ny
-    dvz = (vz_max - vz_min) / nz
-    dv  = dvx   # assume symmetric
-
+    dv  = dvx   # must be cubic
     vxmin = vx_min
-    vymin = vy_min
-    vzmin = vz_min
-
-    print("ns:", nx, ny, nz)
-    print("dvs:", dvx, dvy, dvz)
-    print("mins:", vxmin, vymin, vzmin)
     vlim, vlen = abs(vxmin), nx
     return vlim, vlen, dv
 
@@ -95,6 +76,7 @@ def get_sparse_threshold(reader, pop="proton"):
     return float(cfg[f'{pop}_sparse']['minValue'][0])
 
 
+
 def build_cube(cellid, reader, vlim, vlen, dv):
     """
     cube[iz, iy, ix] convention.
@@ -117,7 +99,6 @@ def build_cube(cellid, reader, vlim, vlen, dv):
     cube[iz[mask], iy[mask], ix[mask]] = fvals[mask]
     return cube
 
-
 ################################
 ######## HERMITE TOOLS #########
 ################################
@@ -125,12 +106,8 @@ def build_cube(cellid, reader, vlim, vlen, dv):
 def run_hermite(cellid, reader, vlim, vlen, dv, order, sp_th, outdir):
     cube = build_cube(cellid, reader, vlim, vlen, dv)
     u    = get_drift_velocity_cube(cube, vlim, vlen)
-    vth  = get_thermal_velocity_cube(cube, vlim, vlen, u)
-
-    #log_cube     = to_log_shifted(cube, sp_th)
-    
-    hermite_cube = get_hermite_spectra_cube(cube, vlim, vlen, order, vth, u)
-    
+    vth  = get_thermal_velocity_cube(cube, vlim, vlen, u)    
+    hermite_cube = get_hermite_spectra_cube(cube, vlim, vlen, order, vth, u)    
     return hermite_cube, u, vth
 
 
@@ -138,7 +115,6 @@ def hermite_basis(v_ax, order, vth, u):
     """
     Compute orthonormal Hermite basis functions φ_n(v) = H_n((v-u)/vth) * G / norm_n
     where H_n are physicist's Hermite polynomials weighted by Gaussian G = exp(-x²/2).
-
     Returns array of shape (order, len(v_ax)).
     """
     x = (v_ax - u) / vth
@@ -204,18 +180,6 @@ def reconstruct_vdf(spectra, vlim, vlen, order, vth, u):
 
 
 
-
-
-def reconstruct_vdf_cube_nolip(spectra, vlim, vlen, order, vth, u):
-    """Reconstruct log_cube from spectra, no clipping."""
-    dv   = 2 * vlim / vlen
-    v_ax = velocity_axis(vlim, vlen, dv)
-    Hx   = hermite_basis(v_ax, order, vth, u[0])
-    Hy   = hermite_basis(v_ax, order, vth, u[1])
-    Hz   = hermite_basis(v_ax, order, vth, u[2])
-    return np.einsum('lmn,nx,my,lz->zyx', spectra, Hx, Hy, Hz)
-
-
 def to_log_shifted(cube, sp_th):
     """log(f) - log(sp_th), with floor at sp_th."""
     cube_clipped = np.maximum(cube, sp_th)
@@ -229,9 +193,10 @@ def from_log_shifted(log_cube, sp_th):
     return cube
 
 
-#################################
-####### ADAPTIVE ALGO ###########
-#################################
+###########################################################################
+########## ADAPTIVE  HERMITE : PARSEVAL CHECK FOR TRUNCATION  #############
+###########################################################################
+
 
 def _compute_level(vdf, s, Hx, Hy, Hz, dv):
     """
@@ -258,45 +223,10 @@ def _compute_level(vdf, s, Hx, Hy, Hz, dv):
             level_power += c * c
     return new_coeffs, level_power
 
-def _level_power(new_c, Hx, Hy, Hz, dv, vlen):
-    field = np.zeros((vlen, vlen, vlen), dtype=np.float64)
-    for (l, m, n), c in new_c.items():
-        field += c * np.einsum('x,y,z->zyx', Hx[n], Hy[m], Hz[l])
-    return field
 
-# Parseval-based stopping metric -- kept for reference / future diagnostics,
-# but NOT used to gate adaptive_transform: linear L2 power is dominated by
-# the core of the distribution, so a fit can satisfy a tight Parseval
-# tolerance while the (much lower-amplitude) tails are still unresolved.
-# _log_delta below is what actually gates the loop.
-#
-# def _parseval_total(log_cube, dv):
-#     """ Total Parseval power from the raw vdf -- O(vlen^3), computed once. """
-#     return float(np.sum(log_cube ** 2)) * dv ** 3
-#
-# def _parseval_delta(P_accum, P_total):
-#     """Relative L2 residual: sqrt(1 - P_accum/P_total)."""
-#     return math.sqrt(max(0.0, 1.0 - P_accum / P_total))
-
-def _log_delta(cube, f_rec_accum, sp_th):
-    """
-    accuracy metric // log space to catch the tails
-    """
-    f_rec = f_rec_accum
-    # if sparse_mask is not None:
-    #     f_rec = np.where(sparse_mask, f_rec_accum, 0.0)
-    log_true = np.log(np.maximum(cube, sp_th))
-    log_rec  = np.log(np.maximum(f_rec, sp_th))
-    return float(np.sqrt(np.mean((log_true - log_rec) ** 2)))
-
-
-###########################################################################
-########## ADAPTIVE  HERMITE : PARSEVAL CHECK FOR TRUNCATION  #############
-###########################################################################
 
 def adaptive_transform(vdf, vlim, vlen, vth, u,
-                       max_order=14,
-                       sp_th=1e-15,
+                       max_order=14,                       
                        tolerance=0.15,
                        ):
     
@@ -308,25 +238,26 @@ def adaptive_transform(vdf, vlim, vlen, vth, u,
     Hy = hermite_basis(v_ax, max_order , vth, u[1])
     Hz = hermite_basis(v_ax, max_order , vth, u[2])
 
-    coeffs = {}
-    log_delta = {}
-    log_delta[0]     = _log_delta(vdf, np.zeros_like(vdf), sp_th)
-    current_power = np.zeros((vlen, vlen, vlen), dtype=np.float64)
+    coeffs, deltas = {},{}
+    P_total = float(np.sum(vdf**2)* dv**3)
+    P_accum = 0.0
 
     def _process_level(s):
-        nonlocal log_delta, current_power
+        nonlocal P_accum       
         new_c, _lp = _compute_level(vdf, s, Hx, Hy, Hz, dv)
-        coeffs.update(new_c)
-        current_power += _level_power(new_c, Hx, Hy, Hz, dv, vlen)
-        log_delta[s] = _log_delta(vdf, current_power, sp_th)
-        return log_delta[s] < tolerance if s> 2 else False
-
-    s_stop = max_order - 1
+        coeffs.update(new_c)        
+        P_accum += _lp        
+        delta = np.sqrt(max(0.0, 1.0 - P_accum / P_total))   # Parseval delta
+        deltas[s] = delta        
+        return deltas[s] < tolerance if s> 2 else False
+    
     for s in range(max_order):
         if _process_level(s):
-            return coeffs, s+1, log_delta
+            return coeffs, s+1, deltas
 
-    return coeffs, max_order, log_delta
+    return coeffs, s+1, deltas
+
+
 
 
 def reconstruct_vdf_adaptive(coeffs, vlim, vlen, order, vth, u ):

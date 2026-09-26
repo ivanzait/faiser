@@ -16,16 +16,17 @@ ORDER       = 26          # indices l,m,n run 0..ORDER-1 for both transforms
 SP_TH       = 1e-15
 
 def main():    
+    
     reader = pt.vlsvfile.VlsvReader(BULK_FILE)
-
-    vlim, vlen, dv = vt.get_vdf_parameters(reader)
+    vlim, vlen, dv = vt.get_vdf_parameters(reader)    
     cellid = vt.get_nearest_vdf_cellid(reader, coords=CELL_COORDS)
+    
     cube = vt.build_cube(cellid, reader, vlim, vlen, dv)
     mask = cube < SP_TH
     u    = vt.get_drift_velocity_cube(cube, vlim, vlen)
     vth  = vt.get_thermal_velocity_cube(cube, vlim, vlen, u)
 
-    spectra, s_stop, delta = vt.adaptive_transform(cube, vlim, vlen, vth, u, max_order=ORDER, tolerance=0.4)
+    spectra, s_stop, delta = vt.adaptive_transform(cube, vlim, vlen, vth, u, max_order=ORDER, tolerance=0.1)
     print('stopped at order:', s_stop)
 
     vdf_rec = vt.reconstruct_vdf_adaptive(spectra, vlim, vlen, ORDER, vth, u )
