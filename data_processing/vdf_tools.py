@@ -317,6 +317,12 @@ def adaptive_transform(vdf, vlim, vlen, vth, u,
 
 
 
+def coeffs_into_cube(coeffs, order):    
+    h_cube = np.zeros((order, order, order))
+    for (l, m, n), c in coeffs.items():
+        h_cube[l, m, n] = c
+    return h_cube
+
 
 def reconstruct_vdf_adaptive(coeffs, vlim, vlen, order, vth, u ):
     """reconstruction from a coefficient dict // for adaptive algo """
@@ -329,8 +335,6 @@ def reconstruct_vdf_adaptive(coeffs, vlim, vlen, order, vth, u ):
     for (l, m, n), c in coeffs.items():
         rec += c * np.einsum('x,y,z->zyx', Hx[n], Hy[m], Hz[l])
     return rec
-
-
 
 
 
