@@ -76,6 +76,20 @@ def get_sparse_threshold(reader, pop="proton"):
     return float(cfg[f'{pop}_sparse']['minValue'][0])
 
 
+def get_inner_boundary_cells(reader):
+    cfg = reader.get_config()
+    boundary_cfg = cfg['copysphere']
+    r_min = float(boundary_cfg['radius'][0])
+    center = (float(boundary_cfg['centerX'][0]),
+             float(boundary_cfg['centerY'][0]),
+             float(boundary_cfg['centerZ'][0]))
+    cellids = reader.read_variable('CellID')
+    cellids = np.asarray(cellids)
+    coords = reader.get_cell_coordinates(cellids)
+    r = np.linalg.norm(coords - np.asarray(center), axis=1)
+    return cellids[r < r_min].astype(np.int64)
+
+
 
 def build_cube(cellid, reader, vlim, vlen, dv):
     """
