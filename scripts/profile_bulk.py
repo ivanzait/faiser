@@ -25,7 +25,7 @@ import os, sys, csv, time
 import multiprocessing as mp
 import numpy as np
 
-sys.path.insert(0, "/Users/ivanzait/Documents/Documents_LM4500/Codes/analysator")
+sys.path.insert(0, "/home/ivanzait/analysator")
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 import pytools as pt
 from data_processing import vdf_tools as vt
@@ -34,11 +34,12 @@ from data_processing import vdf_tools as vt
 # CONFIG -- edit these
 # ===
 
-BULK_FILE = "/Users/ivanzait/Downloads/bulk.0000055.vlsv"
+BULK_FILE = "/wrk-vakka/group/spacephysics/vlasiator/2D/BIE/bulk.0001125.vlsv"
 MAX_ORDER = 20
 TOLERANCE = 0.05
 
 N_WORKERS = max(1, (os.cpu_count() or 2) - 2)   # 1 = serial (clean per-cell timings)
+print('N workers:',N_WORKERS)
 N_CELLS = None      # None = all cells with a VDF; an int = random subsample of that size
 SEED    = 0
 LOG_EVERY = 50      # progress line every N cells
