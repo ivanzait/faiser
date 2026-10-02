@@ -1,7 +1,7 @@
 """
 Assemble the study's PDF presentation (16:9 slides) from already-saved PNGs
 plus a few auxiliary schematic figures (see make_feature_figures.py, run it
-first if ml_corrector/plots/feature_*.png are missing).
+first if plots/feature_*.png are missing).
 
 One page per slide; each page is a plain matplotlib Figure written into a
 single PDF via PdfPages. No LaTeX/browser dependency.
@@ -20,7 +20,7 @@ import matplotlib.image as mpimg
 from matplotlib.backends.backend_pdf import PdfPages
 
 ROOT = os.path.join(os.path.dirname(__file__), '..')
-PLOTS = os.path.join(ROOT, 'ml_corrector', 'plots')
+PLOTS = os.path.join(ROOT, 'plots')
 RECON_PLOTS = os.path.join(ROOT, 'reconnection_2d_beta025', 'plots')
 OUT_PDF = os.path.join(ROOT, 'docs', 'hermite_corrector_presentation.pdf')
 

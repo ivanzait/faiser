@@ -30,7 +30,7 @@ FULL_ORDER = 22
 S_LOW = 2
 CID_LOBE = 16     # near-Maxwellian, far from current sheet
 CID_SHEET = 672   # current-sheet center, strongly non-Maxwellian
-PLOTDIR = os.path.join(os.path.dirname(__file__), '..', 'ml_corrector', 'plots')
+PLOTDIR = os.path.join(os.path.dirname(__file__), '..', 'plots')
 
 
 def main():

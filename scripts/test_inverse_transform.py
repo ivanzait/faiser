@@ -28,7 +28,7 @@ MAX_ORDER   = 20
 TOLERANCE   = 0.05
 SP_TH       = 1e-15
 
-PLOTDIR = os.path.join(os.path.dirname(__file__), '..', 'ml_corrector', 'plots')
+PLOTDIR = os.path.join(os.path.dirname(__file__), '..', 'plots')
 
 
 def main():

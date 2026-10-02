@@ -1,7 +1,4 @@
-
-
-## Adaptive Hermite transform
-
+# Adaptive Hermite transform
 
 - **Stopping rule.** The basis is orthonormal, so by Plancherel the power left out after level $s$ is
   known without reconstructing anything:

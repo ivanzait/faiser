@@ -11,7 +11,7 @@ fix) reproduce hermite_coeffs[0,0,0] to 7 significant figures.
 
 Usage
 -----
-python3 scripts/check_vae_reconstruction.py   # run from the repo root
+python3 scripts/check_cae_reconstruction.py   # run from the repo root
 """
 
 import os, sys
@@ -20,7 +20,6 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import LogNorm
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'data_processing'))
 from data_processing import vdf_tools as vt
 
 # ===
@@ -35,7 +34,7 @@ CAE_PATH = os.path.join(os.path.dirname(__file__), '..', 'vae_data',
 VLIM  = 6.24e6      # recovered by matching forward C[0,0,0]; see module docstring
 SP_TH = 1e-15
 
-PLOTDIR = os.path.join(os.path.dirname(__file__), '..', 'ml_corrector', 'plots')
+PLOTDIR = os.path.join(os.path.dirname(__file__), '..', 'plots')
 
 
 def l2_rel(a, b):
@@ -65,8 +64,10 @@ def main():
           f"u={u}  vth={vth:.6e}  order_used={order_used}")
 
     order = h_true.shape[0]
-    rec_true = vt.reconstruct_vdf(h_true, vlim, vlen, order, vth, u)
-    rec_cae  = vt.reconstruct_vdf(h_cae,  vlim, vlen, order, vth, u)
+    # h_true / h_cae are dense (order, order, order) arrays and the CAE one need not be
+    # tetrahedral, so every entry goes in; negatives are clipped to 0
+    rec = lambda h: np.maximum(vt.reconstruct_vdf_adaptive(dict(np.ndenumerate(h)), vlim, vlen, order, vth, u), 0)
+    rec_true, rec_cae = rec(h_true), rec(h_cae)
 
     eps_true = l2_rel(cube, rec_true)
     eps_cae  = l2_rel(cube, rec_cae)
@@ -94,7 +95,7 @@ def main():
                 ax.set_ylabel(title, fontsize=10)
     fig.suptitle(f"cell {cellid}  eps_rel(true)={eps_true:.4f}  eps_rel(CAE)={eps_cae:.4f}")
     fig.tight_layout(rect=[0, 0, 1, 0.95])
-    save_path = os.path.join(PLOTDIR, f'vae_reconstruction_{cellid}.png')
+    save_path = os.path.join(PLOTDIR, f'cae_reconstruction_{cellid}.png')
     fig.savefig(save_path, dpi=150)
     plt.close(fig)
     print(f"\nPlot saved -> {save_path}")

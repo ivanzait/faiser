@@ -184,12 +184,7 @@ def apply_spectral_window(coeffs, max_order, window='lanczos'):
 ######## HERMITE TOOLS #########
 ################################
 
-def run_hermite(cellid, reader, vlim, vlen, dv, order, sp_th, outdir):
-    cube = build_cube(cellid, reader, vlim, vlen, dv)
-    u    = get_drift_velocity_cube(cube, vlim, vlen)
-    vth  = get_thermal_velocity_cube(cube, vlim, vlen, u)    
-    hermite_cube = get_hermite_spectra_cube(cube, vlim, vlen, order, vth, u)    
-    return hermite_cube, u, vth
+
 
 
 def hermite_basis(v_ax, order, vth, u):
@@ -255,45 +250,11 @@ def get_thermal_velocity_cube(cube, vlim, vlen, u):
     return np.sqrt((Pxx + Pyy + Pzz) / (3 * n))
 
 
-def get_hermite_spectra_cube(cube, vlim, vlen, order, vth, u):
-    """
-    Compute full Hermite spectra (cube indexing: all l,m,n < order).
-    Returns array of shape (order, order, order).
-    """
-    dv   = 2 * vlim / vlen
-    v_ax = velocity_axis(vlim, vlen, dv)
-    Hx   = hermite_basis(v_ax, order, vth, u[0])
-    Hy   = hermite_basis(v_ax, order, vth, u[1])
-    Hz   = hermite_basis(v_ax, order, vth, u[2])
-    # cube[iz, iy, ix];  spectra[l, m, n]  with z↔l, y↔m, x↔n
-    spectra = np.einsum('zyx,nx,my,lz->lmn', cube, Hx, Hy, Hz) * dv**3
-    return spectra
-
-
-def reconstruct_vdf(spectra, vlim, vlen, order, vth, u):
-    """Reconstruct log_cube from spectra, clip negatives."""
-    dv    = 2 * vlim / vlen
-    v_ax  = velocity_axis(vlim, vlen, dv)
-    Hx    = hermite_basis(v_ax, order, vth, u[0])
-    Hy    = hermite_basis(v_ax, order, vth, u[1])
-    Hz    = hermite_basis(v_ax, order, vth, u[2])
-    cube  = np.einsum('lmn,nx,my,lz->zyx', spectra, Hx, Hy, Hz)
-    cube[cube < 0] = 0
-    return cube
 
 
 
-def to_log_shifted(cube, sp_th):
-    """log(f) - log(sp_th), with floor at sp_th."""
-    cube_clipped = np.maximum(cube, sp_th)
-    return np.log(cube_clipped) - np.log(sp_th)
 
 
-def from_log_shifted(log_cube, sp_th):
-    """Inverse of to_log_shifted."""
-    cube = np.exp(log_cube + np.log(sp_th))
-    cube[cube <= sp_th * (1 + 1e-6)] = 0
-    return cube
 
 
 ###########################################################################
@@ -385,6 +346,7 @@ def adaptive_transform(vdf, vlim, vlen, vth, u,
 
 
 
+
 def coeffs_into_cube(coeffs, hermite_order):
     """Dense (hermite_order, hermite_order, hermite_order) array from a coefficient dict."""
     h_cube = np.zeros([hermite_order, hermite_order, hermite_order])
@@ -393,120 +355,19 @@ def coeffs_into_cube(coeffs, hermite_order):
     return h_cube
 
 
-def reconstruct_vdf_adaptive(coeffs, vlim, vlen, order, vth, u ):
-    """reconstruction from a coefficient dict // for adaptive algo """
-    dv   = 2.0 * vlim / vlen
+def reconstruct_vdf_adaptive(coeffs, vlim, vlen, order, vth, u):
+    """
+    Dense VDF from a coefficient dict via ONE contraction (coeffs_into_cube +
+    einsum with optimize=True). vt.reconstruct_vdf_adaptive does the same sum
+    as one full-cube einsum per coefficient, which is far slower at vlen=240.
+    """
+    dv = 2.0 * vlim / vlen
     v_ax = velocity_axis(vlim, vlen, dv)
-    Hx   = hermite_basis(v_ax, order, vth, u[0])
-    Hy   = hermite_basis(v_ax, order, vth, u[1])
-    Hz   = hermite_basis(v_ax, order, vth, u[2])
-    rec = np.zeros((vlen, vlen, vlen), dtype=np.float64)
-    for (l, m, n), c in coeffs.items():
-        rec += c * np.einsum('x,y,z->zyx', Hx[n], Hy[m], Hz[l])
-    return rec
+    Hx, Hy, Hz = (hermite_basis(v_ax, order, vth, u[i]) for i in range(3))
+    h_cube = coeffs_into_cube(coeffs, order)
+    return np.einsum('lmn,nx,my,lz->zyx', h_cube, Hx, Hy, Hz, optimize=True)
 
 
 
-#############################
-############# I/O ###########
-#############################
-
-def run_hermite_and_save(cellid, reader, vlim, vlen, dv, order, sp_th, outdir):
-    cube = build_cube(cellid, reader, vlim, vlen, dv)
-    u    = get_drift_velocity_cube(cube, vlim, vlen)
-    vth  = get_thermal_velocity_cube(cube, vlim, vlen, u)
-
-    log_cube     = to_log_shifted(cube, sp_th)
-    hermite_cube = get_hermite_spectra_cube(log_cube, vlim, vlen, order, vth, u)
-
-    os.makedirs(outdir, exist_ok=True)
-    np.savez_compressed(
-        os.path.join(outdir, f"cell_{cellid}.npz"),
-        cube=cube, hermite_coeffs=hermite_cube,
-        u=u, vth=vth, vlim=vlim, vlen=vlen, order=order, sp_th=sp_th,
-    )
-    
-    return hermite_cube, u, vth
-
-
-def load_and_plot(npz_path):
-    data          = np.load(npz_path)
-    cube          = data['cube']
-    hermite_cube  = data['hermite_coeffs']
-    u             = data['u']
-    vth           = float(data['vth'])
-    vlim          = float(data['vlim'])
-    vlen          = int(data['vlen'])
-    order         = int(data['order'])
-    sp_th         = float(data['sp_th'])
-
-    log_cube_rec = reconstruct_vdf_cube_nolip(hermite_cube, vlim, vlen, order, vth, u)
-    cube_rec     = from_log_shifted(log_cube_rec, sp_th)
-
-    plot_vdf_reconstruction(cube, cube_rec, vlim, vlen, sp_th)
-
-    residual = np.abs(cube - cube_rec)
-    rel_err  = np.linalg.norm(residual) / np.linalg.norm(cube)
-    print(f"{npz_path}: rel L2 error = {rel_err:.4e}")
-    return rel_err
-
-
-#############################
-####  PLOTTING ROUTINES  ####
-#############################
-
-def plot_vdf_2d(vdf_ar, vlim, vlen, sp_th=1e-15):
-    fig = plt.figure(figsize=(10, 8))
-    ax1 = fig.add_subplot(131)
-    ax2 = fig.add_subplot(132)
-    ax3 = fig.add_subplot(133)
-    UP_TH = np.max(np.sum(vdf_ar, axis=0))
-
-    for ax, proj, label in [
-        (ax1, np.sum(vdf_ar, axis=0), 'yz'),
-        (ax2, np.sum(vdf_ar, axis=1), 'xz'),
-        (ax3, np.sum(vdf_ar, axis=2), 'xy'),
-    ]:
-        im = ax.imshow(proj, origin='lower', extent=[-vlim, vlim, -vlim, vlim],
-                       cmap='Spectral', norm=LogNorm(vmin=sp_th, vmax=UP_TH))
-        ax.set_title(label)
-        plt.colorbar(im, ax=ax, orientation='horizontal',
-                     label='f(v) [s^3/m^6]', location='top')
-    fig.savefig("vdf_2d.png", dpi=300)
-
-
-def plot_vdf_reconstruction(cube, cube_rec, vlim, vlen, sp_th):
-    fig, axes = plt.subplots(3, 3, figsize=(14, 12))
-    UP_TH  = max(np.max(np.sum(cube, axis=0)), np.max(np.sum(cube_rec, axis=0)))
-    labels = ['sum_z (xy)', 'sum_y (xz)', 'sum_x (yz)']
-
-    for col, (ax_sum, label) in enumerate(zip([0, 1, 2], labels)):
-        orig_proj = np.sum(cube,     axis=ax_sum)
-        rec_proj  = np.sum(cube_rec, axis=ax_sum)
-        diff_proj = np.abs(orig_proj - rec_proj)
-
-        im0 = axes[0, col].imshow(orig_proj, origin='lower',
-                                   extent=[-vlim, vlim, -vlim, vlim],
-                                   cmap='Spectral',
-                                   norm=LogNorm(vmin=sp_th, vmax=UP_TH))
-        axes[0, col].set_title(f'Original ({label})')
-        plt.colorbar(im0, ax=axes[0, col], orientation='horizontal', location='top')
-
-        im1 = axes[1, col].imshow(rec_proj, origin='lower',
-                                   extent=[-vlim, vlim, -vlim, vlim],
-                                   cmap='Spectral',
-                                   norm=LogNorm(vmin=sp_th, vmax=UP_TH))
-        axes[1, col].set_title(f'Reconstructed ({label})')
-        plt.colorbar(im1, ax=axes[1, col], orientation='horizontal', location='top')
-
-        im2 = axes[2, col].imshow(diff_proj, origin='lower',
-                                   extent=[-vlim, vlim, -vlim, vlim],
-                                   cmap='inferno')
-        axes[2, col].set_title(f'|Diff| ({label})')
-        plt.colorbar(im2, ax=axes[2, col], orientation='horizontal', location='top')
-
-    fig.tight_layout()
-    fig.savefig("vdf_reconstruction.png", dpi=300)
-    plt.close(fig)
 
 
