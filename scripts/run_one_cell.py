@@ -39,11 +39,12 @@ plt.rcParams['text.usetex'] = False
 # CONFIG -- edit these (or override on the command line)
 # ===
 
-BULK_FILE = "/wrk-vakka/group/spacephysics/vlasiator/2D/BIE/bulk.0001125.vlsv"
+BULK_FILE = "/turso/group/spacephysics/vlasiator/data/L0/2D/BIE/bulk.0001125.vlsv"
 CELL_ID   = 795501
 MAX_ORDER = 20
 TOLERANCE = 0.05       # adaptive_transform stops once the Parseval delta < this
 WINDOW    = 'lanczos'  # 'lanczos' or 'raised_cosine'
+BBOX_MARGIN = 1        # cells added around the VDF support box
 
 PROJ_AXIS = 0          # cube[iz,iy,ix]: 0 -> sum over z, shows the (vy,vx) plane
 DECADES   = 8          # dynamic range of the log colour scales
@@ -97,6 +98,8 @@ def main():
     ap.add_argument('--order', type=int, default=MAX_ORDER, help='max Hermite order (ceiling)')
     ap.add_argument('--tolerance', type=float, default=TOLERANCE)
     ap.add_argument('--window', default=WINDOW, choices=['lanczos', 'raised_cosine'])
+    ap.add_argument('--bbox-margin', type=int, default=BBOX_MARGIN)
+    ap.add_argument('--no-bbox', action='store_true', help='do not crop the reconstructions to the VDF bounding box')
     args = ap.parse_args()
 
     reader = pt.vlsvfile.VlsvReader(args.bulk)
@@ -122,6 +125,17 @@ def main():
 
     rec   = reconstruct(coeffs,   order_used, vlim, vlen, vth, u)
     rec_w = reconstruct(coeffs_w, order_used, vlim, vlen, vth, u)
+    # Crop the reconstructions to the bounding box of the TRUE VDF support
+    # (cells >= sp_th, plus a margin), which removes the ringing lobes that
+    # sit outside it. The box comes from the original cube, so in production
+    # it has to be stored per cell (see bbox_idx in vdfs_for_initialization).
+    box = None
+    if not args.no_bbox:
+        box = vt.get_vdf_bounding_box(cube, vlim, vlen, sp_th=sp_th, margin=args.bbox_margin)
+        rec, rec_w = (vt.apply_bounding_box(r, box['idx']) for r in (rec, rec_w))
+        n_box = int(np.prod([hi - lo + 1 for lo, hi in box['idx']]))
+        print(f"bbox idx (z,y,x) = {box['idx']}  ({n_box} of {vlen**3} voxels, "
+              f"{box['n_active']} above sp_th)")
     e, e_w = errors(cube, rec, sp_th), errors(cube, rec_w, sp_th)
     print(f"{'':14s} {'rel L2 (support)':>17} {'eps_log':>9} {'frac<0':>8}")
     print(f"{'no window':14s} {e[0]:17.4f} {e[1]:9.4f} {e[2]:8.3f}")
@@ -136,15 +150,23 @@ def main():
     vlim_kms = vlim / 1e3
     extent = [-vlim_kms, vlim_kms, -vlim_kms, vlim_kms]
     plane = {0: ('vx', 'vy'), 1: ('vx', 'vz'), 2: ('vy', 'vz')}[PROJ_AXIS]
+    tag = '' if box is None else ' + bbox'
+    # projection plane -> which cube axes are shown as columns (x) and rows (y)
+    col_ax, row_ax = {0: (2, 1), 1: (2, 0), 2: (1, 0)}[PROJ_AXIS]
     for ax, img, title in [
         (axes[0, 0], p_true,    'original VDF'),
-        (axes[0, 1], proj(rec),   f'reconstruction, no window (order {order_used})'),
-        (axes[0, 2], proj(rec_w), f'reconstruction, {args.window} window'),
+        (axes[0, 1], proj(rec),   f'reconstruction, no window (order {order_used}){tag}'),
+        (axes[0, 2], proj(rec_w), f'reconstruction, {args.window} window{tag}'),
     ]:
         im = ax.imshow(img, origin='lower', cmap='Spectral_r', norm=norm, extent=extent)
         ax.set_title(title)
         ax.set_xlabel(f'{plane[0]} [km/s]')
         ax.set_ylabel(f'{plane[1]} [km/s]')
+        if box is not None:   # outline the crop box (cell edges = centre -/+ dv/2)
+            (c0, c1), (r0, r1) = box['vel'][col_ax], box['vel'][row_ax]
+            h = dv / 2e3
+            ax.add_patch(plt.Rectangle((c0 / 1e3 - h, r0 / 1e3 - h), (c1 - c0) / 1e3 + 2 * h,
+                                       (r1 - r0) / 1e3 + 2 * h, fill=False, ec='k', ls='--', lw=0.8))
     fig.colorbar(im, ax=axes[0, :3].tolist(), shrink=0.8, label='f summed along one axis')
 
     # 1-D marginal along vx (sum over z,y) -- tails and ringing show up here
@@ -157,7 +179,7 @@ def main():
     peak = cube.sum(axis=(0, 1)).max()
     ax.set_ylim(peak * 10.0 ** -DECADES, peak * 2)
     ax.set_xlabel('vx [km/s]')
-    ax.set_title('1-D marginal f(vx)  (negatives clipped)')
+    ax.set_title(f'1-D marginal f(vx)  (negatives clipped{tag})')
     ax.legend(fontsize=8)
 
     # Hermite spectra: before / after window on one shared log scale
@@ -204,7 +226,7 @@ def main():
                  f"rel L2: {e[0]:.3f} -> {e_w[0]:.3f}", fontsize=12)
 
     os.makedirs(PLOTDIR, exist_ok=True)
-    out = os.path.join(PLOTDIR, f'run_one_cell_{args.cellid}.png')
+    out = os.path.join(PLOTDIR, f'run_one_cell_{args.cellid}{"_nobbox" if box is None else ""}.png')
     fig.savefig(out, dpi=140)
     plt.close(fig)
     print(f"saved -> {out}")
