@@ -2,6 +2,10 @@ __pycache__/
 *.pyc
 *.swp
 
+.venv
+
+data/
+
 # Vlasiator bulk files / simulation output are not part of this repo
 *.vlsv
 reconnection_2d_beta025/

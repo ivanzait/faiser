@@ -99,6 +99,73 @@ def build_cube(cellid, reader, vlim, vlen, dv):
     cube[iz[mask], iy[mask], ix[mask]] = fvals[mask]
     return cube
 
+
+def get_vdf_bounding_box(cube, vlim, vlen, sp_th=1e-15, margin=0):
+    """
+    Axis-aligned bounding box of the VDF support (cells >= sp_th).
+    cube convention: cube[iz, iy, ix].
+
+    margin : int, extra cells to grow the box by on every side (clipped to
+        the grid), for callers that want breathing room around the tight
+        support -- e.g. apply_bounding_box() on a reconstruction, which
+        otherwise crops it off exactly at the last real-data cell, mid-slope
+        rather than letting it decay into view.
+
+    Returns None if no cell reaches sp_th, otherwise a dict:
+        idx  : ((iz_min,iz_max), (iy_min,iy_max), (ix_min,ix_max))  inclusive
+        vel  : ((vz_min,vz_max), (vy_min,vy_max), (vx_min,vx_max))  physical [m/s]
+        n_active : number of cells >= sp_th
+    """
+    mask = cube >= sp_th
+    if not mask.any():
+        return None
+
+    iz_idx, iy_idx, ix_idx = np.nonzero(mask)
+    idx_bounds = ((max(int(iz_idx.min()) - margin, 0), min(int(iz_idx.max()) + margin, vlen - 1)),
+                  (max(int(iy_idx.min()) - margin, 0), min(int(iy_idx.max()) + margin, vlen - 1)),
+                  (max(int(ix_idx.min()) - margin, 0), min(int(ix_idx.max()) + margin, vlen - 1)))
+
+    dv = 2 * vlim / vlen
+    v_ax = velocity_axis(vlim, vlen, dv)
+    vel_bounds = tuple((float(v_ax[lo]), float(v_ax[hi])) for lo, hi in idx_bounds)
+
+    return {'idx': idx_bounds, 'vel': vel_bounds, 'n_active': int(mask.sum())}
+
+
+def apply_bounding_box(cube, idx_bounds):
+    """
+    Zero out everything outside an axis-aligned index box (as returned by
+    get_vdf_bounding_box()['idx']). Cheaper than a per-voxel mask and enough
+    to cut the Hermite-ringing lobes that sit outside the true VDF support.
+    """
+    out = np.zeros_like(cube)
+    (iz0, iz1), (iy0, iy1), (ix0, ix1) = idx_bounds
+    out[iz0:iz1 + 1, iy0:iy1 + 1, ix0:ix1 + 1] = cube[iz0:iz1 + 1, iy0:iy1 + 1, ix0:ix1 + 1]
+    return out
+
+
+def apply_spectral_window(coeffs, max_order, window='lanczos'):
+    """
+    Taper Hermite coefficients smoothly to zero as total order s -> max_order,
+    instead of the implicit hard cutoff from truncating the level loop at
+    max_order in adaptive_transform. Targets Gibbs ringing from truncating
+    the coefficient series itself -- a different mechanism from the ringing
+    VDF padding addresses (the sharp real-space edge), and independent of it.
+
+    window : 'lanczos'        w(s) = sinc(s / max_order)
+             'raised_cosine'  w(s) = 0.5 * (1 + cos(pi * s / max_order))
+
+    Returns a new coefficient dict; does not mutate the input.
+    """
+    if window == 'lanczos':
+        w = lambda s: float(np.sinc(s / max_order))
+    elif window == 'raised_cosine':
+        w = lambda s: 0.5 * (1.0 + math.cos(math.pi * s / max_order))
+    else:
+        raise ValueError(f"unknown window {window!r}")
+    return {k: v * w(sum(k)) for k, v in coeffs.items()}
+
+
 ################################
 ######## HERMITE TOOLS #########
 ################################
@@ -145,7 +212,10 @@ def get_thermal_velocity_cube(cube, vlim, vlen, u):
     dv   = 2 * vlim / vlen
     v_ax = velocity_axis(vlim, vlen, dv)
     n    = cube.sum() * dv**3
-    X, Y, Z = np.meshgrid(v_ax, v_ax, v_ax, indexing='xy')  # cube[z,y,x]
+    # cube[z,y,x] -- indexing='ij' makes the axis order unambiguous: the k-th
+    # output varies along axis k (unlike 'xy', which swaps the first two axes
+    # for 3 equal-length inputs and silently mismatches this u/axis pairing).
+    Z, Y, X = np.meshgrid(v_ax, v_ax, v_ax, indexing='ij')
     Pxx  = np.sum(cube * (X - u[0])**2) * dv**3
     Pyy  = np.sum(cube * (Y - u[1])**2) * dv**3
     Pzz  = np.sum(cube * (Z - u[2])**2) * dv**3
@@ -258,6 +328,14 @@ def adaptive_transform(vdf, vlim, vlen, vth, u,
     return coeffs, s+1, deltas
 
 
+
+
+def coeffs_into_cube(coeffs, hermite_order):
+    """Dense (hermite_order, hermite_order, hermite_order) array from a coefficient dict."""
+    h_cube = np.zeros([hermite_order, hermite_order, hermite_order])
+    for k, v in coeffs.items():
+        h_cube[k] = v
+    return h_cube
 
 
 def reconstruct_vdf_adaptive(coeffs, vlim, vlen, order, vth, u ):

@@ -4,7 +4,6 @@ import sys
 sys.path.insert(0, "/Users/ivanzait/Documents/Documents_LM4500/Codes/analysator")
 import pytools as pt
 import vdf_tools as vt
-from adaptive_hermite import adaptive_transform, coeffs_into_cube, plot_hcube
 
 #reader = pt.vlsvfile.VlsvReader("/wrk-vakka/group/spacephysics/vlasiator/2D/BIE/restart.0001125.2025-06-06_22-31-27.vlsv")
 #data_dir = "/scratch/project_2000203/zaitsevi/runs/reconnection_beta025_large"
@@ -23,6 +22,7 @@ cellid_ar = []
 hermite_ar = []
 v_mean_ar = [] ## hermite need mean (bulk) velocity
 v_th_ar = [] ## hermite also need thermal velocity
+bbox_idx_ar = []  ## VDF bounding box, index space: ((iz0,iz1),(iy0,iy1),(ix0,ix1))
 
 SP_TH = vt.get_sparse_threshold(reader, pop="proton") ## 1e-15 ## sparsity threshold
 #SP_TH =  1e-15 ## sparsity threshold
@@ -47,9 +47,12 @@ for cellid in [target_cellid]:
     ### tetrahedral transform
     u = vt.get_drift_velocity_cube(cube, vlim, vlen)
     vth = vt.get_thermal_velocity_cube(cube, vlim, vlen, u)
-    hermite_coeffs, s_stop = vt.adaptive_transform( cube, vlim, vlen, vth, u, max_order=HN)
-    h_cube = coeffs_into_cube(hermite_coeffs, HN)  # indices l,m,n run 0..HN-1, matching cubic order=HN
-        
+    hermite_coeffs, order_used, deltas = vt.adaptive_transform(cube, vlim, vlen, vth, u, max_order=HN)
+    h_cube = vt.coeffs_into_cube(hermite_coeffs, HN)  # indices l,m,n run 0..HN-1, matching cubic order=HN
+
+    box = vt.get_vdf_bounding_box(cube, vlim, vlen, sp_th=SP_TH)
+    bbox_idx = box['idx'] if box is not None else ((0, 0), (0, 0), (0, 0))  # empty VDF fallback
+
     coords = reader.get_cell_coordinates(cellid)
     vdf_ar.append(cube)
     v_mean_ar.append(u)
@@ -57,6 +60,9 @@ for cellid in [target_cellid]:
     hermite_ar.append(h_cube)
     coords_ar.append(coords)
     cellid_ar.append(cellid)
-    
-    np.savez_compressed(outdir+"/vdf_data.npz", vdfs=vdf_ar, coords=coords_ar, cellids=cellid_ar, v_means=v_mean_ar, v_ths=v_th_ar, hermite_coeffs=hermite_ar) 
+    bbox_idx_ar.append(bbox_idx)
+
+    np.savez_compressed(outdir+"/vdf_data.npz", vdfs=vdf_ar, coords=coords_ar, cellids=cellid_ar,
+                         v_means=v_mean_ar, v_ths=v_th_ar, hermite_coeffs=hermite_ar,
+                         bbox_idx=bbox_idx_ar, vlim=vlim, vlen=vlen)
     

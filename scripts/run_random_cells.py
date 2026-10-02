@@ -14,6 +14,7 @@ sys.path.insert(0, "/Users/ivanzait/Documents/Documents_LM4500/Codes/analysator"
 import pytools as pt
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'data_processing'))
 import vdf_tools as vt
+
 # from data_processing.vdf_tools import (get_vdf_parameters, build_cube,
 #                         get_drift_velocity_cube, get_thermal_velocity_cube,
 #                         get_sparse_threshold, adaptive_transform)
@@ -25,7 +26,7 @@ import vdf_tools as vt
 BULKDIR       = '/Users/ivanzait/Downloads/'
 BULKFILE      = 'bulk.0000055.vlsv'
 N_CELLS       = 10
-H_ORDER     = 22
+H_ORDER       = 22
 REL_THRESHOLD = 0.1
 SEED          = 1812
 
@@ -39,7 +40,7 @@ def main():
     sp_th = vt.get_sparse_threshold(reader)
 
     cells_with_vdf = reader.read(mesh='SpatialGrid', tag='CELLSWITHBLOCKS')
-    n_total = len(cells_with_vdf)    
+    n_total = len(cells_with_vdf)
     print(f"File: {fpath}")
     print(f"vlen={vlen}  vlim={vlim/1e3:.0f} km/s  sp_th={sp_th:.1e}")
     print(f"Cells with VDF: {n_total}\n")
@@ -53,7 +54,7 @@ def main():
         cube = vt.build_cube(cid, reader, vlim, vlen, dv)
         u    = vt.get_drift_velocity_cube(cube, vlim, vlen)
         vth  = vt.get_thermal_velocity_cube(cube, vlim, vlen, u)
-        sparse_mask = cube >= sp_th                        
+        sparse_mask = cube >= sp_th
         Hspectra, s_stop, delta = vt.adaptive_transform(cube, vlim, vlen, vth, u, max_order=H_ORDER, tolerance=0.01)
         print(s_stop)
 
