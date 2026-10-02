@@ -25,7 +25,7 @@ import os, sys, csv, time
 import multiprocessing as mp
 import numpy as np
 
-sys.path.insert(0, "/Users/ivanzait/Documents/Documents_LM4500/Codes/analysator")
+sys.path.insert(0, "/home/ivanzait/analysator")
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 import pytools as pt
 from data_processing import vdf_tools as vt
@@ -34,11 +34,20 @@ from data_processing import vdf_tools as vt
 # CONFIG -- edit these
 # ===
 
-BULK_FILE = "/Users/ivanzait/Downloads/bulk.0000055.vlsv"
+BULK_FILE = "/wrk-vakka/group/spacephysics/vlasiator/2D/BIE/bulk.0001125.vlsv"
 MAX_ORDER = 20
 TOLERANCE = 0.05
 
+# Set for global magnetospheric runs: skips cells inside the inner
+# (ionosphere/copysphere) boundary sphere near the planet, where there is
+# no real VDF -- get_drift_velocity_cube/get_thermal_velocity_cube divide
+# by cube.sum(), which is 0 (or a degenerate stray VDF) there and blows up.
+# Leave False for box/local runs (e.g. the 2D reconnection setups) that
+# have no such boundary.
+GLOBAL_RUN = True
+
 N_WORKERS = max(1, (os.cpu_count() or 2) - 2)   # 1 = serial (clean per-cell timings)
+print('N workers:',N_WORKERS)
 N_CELLS = None      # None = all cells with a VDF; an int = random subsample of that size
 SEED    = 0
 LOG_EVERY = 50      # progress line every N cells
@@ -94,6 +103,18 @@ def main():
     print(f"\nreader + mesh parameters ready in {time.perf_counter() - t_init:.1f} s (per process)")
     cells = np.atleast_1d(_reader.read(mesh="SpatialGrid", tag="CELLSWITHBLOCKS", name="proton"))
     vlen = _params[1]
+
+    if GLOBAL_RUN:
+        # get_inner_boundary_cells checks the WHOLE spatial grid, not just
+        # cells_with_vdf, so len(skip) alone isn't comparable to len(cells)
+        # -- report how many of cells_with_vdf actually got removed.
+        skip = vt.get_inner_boundary_cells(_reader)
+        n_before = len(cells)
+        cells = cells[~np.isin(cells, skip)]
+        n_removed = n_before - len(cells)
+        if n_removed:
+            print(f"GLOBAL_RUN: skipping {n_removed} inner-boundary cells "
+                  f"(no real VDF) out of {n_before}")
     if N_CELLS is not None and N_CELLS < len(cells):
         cells = np.random.default_rng(SEED).choice(cells, size=N_CELLS, replace=False)
     cells = [int(c) for c in cells]
