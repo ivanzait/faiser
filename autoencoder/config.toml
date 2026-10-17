@@ -1,0 +1,16 @@
+# Config for the AE pilot. No paths live in the code.
+[data]
+run_dir    = "/Users/ivanzait/Documents/Documents_LM4500/Codes/Vlasiator/runs/two_stream/out_dense"
+analysator = "/Users/ivanzait/Documents/Documents_LM4500/Codes/analysator"
+out_file   = "autoencoder/data/vdf32.npz"
+files      = "bulk.*.vlsv"
+n_grid     = 32      # dense target grid per axis
+box        = 5.0     # half-width of the box in units of v_th
+
+[ae]
+latent     = 16      # d
+epochs     = 300
+batch      = 32
+lr         = 1e-3
+test_x_frac = 0.75   # cells with x above this fraction of the box are held out
+seed       = 0
