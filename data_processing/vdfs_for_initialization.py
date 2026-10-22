@@ -38,6 +38,7 @@ BULK_FILE = "/wrk-vakka/group/spacephysics/vlasiator/2D/BIE/bulk.0001125.vlsv"
 OUTDIR    = os.path.join(os.path.dirname(__file__), '..', 'data_initialization')
 HN        = 20      # fixed Hermite order -> every cell's hermite cube has shape (HN,HN,HN)
 TOLERANCE = 0.05     # adaptive_transform stops early once the Parseval delta < this
+SQRT_F    = True     # expand sqrt(f), see vdf_tools.adaptive_transform; saved in the npz for the reconstruction
 
 GLOBAL_RUN = True    # skip inner-boundary cells with no real VDF -- see profile_bulk.py
 SAVE_DENSE_VDF = True   # see NOTE above before raising N_CELLS much past a few dozen
@@ -69,14 +70,14 @@ def process_cell(cid):
     u = vt.get_drift_velocity_cube(cube, vlim, vlen)
     vth = vt.get_thermal_velocity_cube(cube, vlim, vlen, u)
     coeffs, order_used, deltas = vt.adaptive_transform(
-        cube, vlim, vlen, vth, u, max_order=HN, tolerance=TOLERANCE)
+        cube, vlim, vlen, vth, u, max_order=HN, tolerance=TOLERANCE, sqrt_f=SQRT_F)
     h_cube = vt.coeffs_into_cube(coeffs, HN)
     coords = reader.get_cell_coordinates(cid)
 
-    # Tight bounding box of the VDF support, index space ((iz0,iz1),(iy0,iy1),(ix0,ix1)).
+    # Box of everything stored for the cell (halo included), index space ((iz0,iz1),(iy0,iy1),(ix0,ix1)).
     # Stored so a reconstruction can be cropped to it (apply_bounding_box); the box can't
     # be recomputed from the coefficients. (0,0) box for an empty VDF.
-    box = vt.get_vdf_bounding_box(cube, vlim, vlen, sp_th=_sp_th)
+    box = vt.get_vdf_bounding_box(cube, vlim, vlen)
     bbox_idx = box['idx'] if box is not None else ((0, 0), (0, 0), (0, 0))
 
     row = dict(cellid=int(cid), coords=coords, u=u, vth=float(vth),
@@ -141,7 +142,7 @@ def main():
         v_means=np.array(v_mean_ar), v_ths=np.array(v_th_ar),
         hermite_coeffs=np.array(hermite_ar), order_used=np.array(order_used_ar),
         bbox_idx=np.array(bbox_ar),   # (N, 3, 2): per axis (z, y, x), inclusive index bounds
-        vlim=_params[0], vlen=_params[1],
+        vlim=_params[0], vlen=_params[1], sqrt_f=SQRT_F,
     )
     
     if SAVE_DENSE_VDF:

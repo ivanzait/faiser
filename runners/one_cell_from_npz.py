@@ -1,6 +1,6 @@
 """Original vs reconstructed VDF for a cell saved by runners/run_one_cell.py.
 
-    python plot_routines/plot_one_cell.py [data/one_cell_run_BIE_tstep1125.npz]
+    python runners/one_cell_from_npz.py [data/one_cell_run_BIE_tstep1125.npz]
 
 Run id and time step come from the file name; coefficients, u, vth, vlim, vlen, bounding box and cell id come
 from the npz. The spectrum may be saved sparse (a pickled {(l, m, n): c} dict) or dense (a plain array, flag
@@ -17,13 +17,12 @@ sys.path.insert(0, "/home/ivanzait/analysator")
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 import pytools as pt
 from data_processing import vdf_tools as vt
-from plot_routines.plot_tools import original_vs_reconstruction
+from plot_routines import plot_tools
 
 plt.rcParams['text.usetex'] = False   # importing analysator switches it on; there is no latex here
 
 NPZ_FILE = os.path.join(os.path.dirname(__file__), '..', 'data', 'one_cell_run_BIE_tstep1125.npz')
 BULK_DIR = "/turso/group/spacephysics/vlasiator/data/L0/2D"     # <BULK_DIR>/<runid>/bulk.<tstep, 7 digits>.vlsv
-AXIS     = 0                                                    # axis summed over (0: the vx-vy plane)
 PLOTDIR  = os.path.join(os.path.dirname(__file__), '..', 'plots')
 
 
@@ -50,14 +49,15 @@ def main(npz_file):
     print(f"{runid} t={tstep}: {'dense' if dense else 'sparse'} spectrum, order_used={order_used}")
     vlim, vlen, cell_id = float(d['vlim']), int(d['vlen']), int(d['cellids'])
 
-    rec = vt.reconstruct_vdf_adaptive(coeffs, vlim, vlen, order, float(d['v_ths']), d['v_means'])
+    sqrt_f = bool(d['sqrt_f']) if 'sqrt_f' in d.files else False   # files from before sqrt_f are plain-f spectra
+    rec = vt.reconstruct_vdf_adaptive(coeffs, vlim, vlen, order, float(d['v_ths']), d['v_means'], sqrt_f=sqrt_f)
     rec = vt.apply_bounding_box(rec, d['bbox_idx'])
 
     reader = pt.vlsvfile.VlsvReader(f'{BULK_DIR}/{runid}/bulk.{tstep:07d}.vlsv')
     cube = vt.build_cube(cell_id, reader, vlim, vlen, 2 * vlim / vlen)
 
-    fig = original_vs_reconstruction(cube, rec, vlim, axis=AXIS,
-                                     labels=('original', f'reconstruction (order {order_used} + bbox)'))
+    fig = plot_tools.vdf_2d([cube, rec], vlim, ['original', f'reconstruction (order {order_used} + bbox)'],
+                            reduce='sum', vel_bounds=vt.get_vdf_bounding_box(cube, vlim, vlen)['vel'])
     fig.suptitle(f'{runid}   t = {tstep}   cell {cell_id}')
     os.makedirs(PLOTDIR, exist_ok=True)
     out = os.path.join(PLOTDIR, f'{stem}_original_vs_reconstruction.png')

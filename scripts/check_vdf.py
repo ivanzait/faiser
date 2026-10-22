@@ -7,13 +7,12 @@ import numpy as np
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
-from matplotlib.colors import LogNorm
 
 sys.path.insert(0, "/home/ivanzait/analysator")
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 import pytools as pt
 from data_processing import vdf_tools as vt
-from plot_routines.plot_tools import plot_vdf, project
+from plot_routines import plot_tools
 
 plt.rcParams['text.usetex'] = False
 BULK_DIR = "/turso/group/spacephysics/vlasiator/data/L0/2D"
@@ -38,11 +37,7 @@ vel = np.asarray(reader.read_variable('proton/vg_v', cellids=cid)).ravel()
 print(f'stored    : n = {rho/1e6:.4g} cm^-3 | u = {np.round(vel/1e3, 1)} km/s')
 print(f'negative voxels: {(cube < 0).sum()}, their sum / total = {cube[cube < 0].sum() / cube.sum():.2g}')
 
-fig, ax = plt.subplots(1, 3, figsize=(15, 4.5), constrained_layout=True)
-norm = LogNorm(project(cube, 0).max() * 1e-8, project(cube, 0).max())
-for axis, a in enumerate(ax):
-    im = plot_vdf(a, cube, vlim, axis=axis, norm=norm, title=f'sum over v{"zyx"[axis]}')
-fig.colorbar(im, ax=list(ax), shrink=0.8)
+fig = plot_tools.vdf_2d([cube], vlim, ['original'], reduce='sum')
 fig.suptitle(f'{runid} t={tstep} cell {cid}')
 os.makedirs('plots', exist_ok=True)
 out = f'plots/vdf_{runid}_tstep{tstep}_cell{cid}.png'

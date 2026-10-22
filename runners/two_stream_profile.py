@@ -1,3 +1,7 @@
+"""Two-stream test run: f(vx, x) integrated over vy, vz along the 1D box, with a bulk variable profile above it.
+
+    python3 runners/two_stream_profile.py <time step>
+"""
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib as mpl

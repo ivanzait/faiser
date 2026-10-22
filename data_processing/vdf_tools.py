@@ -1,8 +1,14 @@
 """
-VDF reader and Hermite transform tools for Vlasiator bulk files.
-Original by Ivan Zaitsev; patched:
-  - get_vdf_parameters: dvx read from VLSV file (was hardcoded to 52000)
-  - build_cube: accepts explicit vlim/vlen/dv parameters
+VDF tools for Vlasiator bulk files and the adaptive Hermite transform.
+
+  reading   get_vdf_parameters, build_cube, get_sparse_threshold, get_inner_boundary_cells,
+            get_cellid_at_coords, get_nearest_vdf_cellid
+  grid      velocity_axis, get_vdf_bounding_box, apply_bounding_box
+  moments   get_drift_velocity_cube, get_thermal_velocity_cube
+  Hermite   hermite_basis, adaptive_transform, coeffs_into_cube, reconstruct_vdf_adaptive
+
+Cubes follow cube[iz, iy, ix] on a cubic velocity mesh of vlen cells per axis with cell centres
+-vlim + dv/2 + i*dv (see velocity_axis). Velocities are in m/s.
 """
 
 import os
@@ -17,6 +23,11 @@ from matplotlib.colors import LogNorm
 ################################
 
 def get_vdf_parameters(reader):    
+    """
+    Velocity mesh of the proton population as (vlim, vlen, dv): vlen = 4 x the number of blocks per
+    axis (Vlasiator blocks are 4x4x4 velocity cells), vlim = |vx_min|, dv = cell size. Assumes a cubic
+    mesh symmetric about 0.
+    """
     extents = reader.get_velocity_mesh_size(pop="proton")
     nx = int(extents[0] * 4)
     vx_min, vy_min, vz_min, vx_max, vy_max, vz_max = reader.get_velocity_mesh_extent(pop="proton")
@@ -57,26 +68,30 @@ def get_nearest_vdf_cellid(reader, coords=None, pop="proton"):
 
 def velocity_axis(vlim, vlen, dv):
     """
-    Cell-CENTER velocity axis, consistent with build_cube's binning
-    (ix = round((v+vlim-dv/2)/dv)  <=>  v_center[i] = -vlim + dv/2 + i*dv).
+    Cell-centre velocity axis, v[i] = -vlim + dv/2 + i*dv, matching the binning in build_cube.
 
-    Do NOT use np.linspace(-vlim, vlim, vlen) -- that places vlen points
-    INCLUSIVE of both endpoints, giving spacing 2*vlim/(vlen-1), which does
-    NOT match the actual grid cell centers (spacing dv=2*vlim/vlen) that
-    build_cube used to bin the VDF. This off-by-one caused the discrete
-    Hermite basis functions to be evaluated at the wrong points, breaking
-    their normalization
+    Not np.linspace(-vlim, vlim, vlen): its spacing is 2*vlim/(vlen-1), so the points miss the cell
+    centres and the discrete normalisation of the Hermite basis breaks.
     """
     
     return -vlim + dv / 2.0 + np.arange(vlen) * dv
 
 
 def get_sparse_threshold(reader, pop="proton"):
+    """
+    Sparsity threshold `<pop>_sparse.minValue` from the run config. Vlasiator keeps a 4x4x4 velocity
+    block only if some cell in it reaches this value (or a neighbouring block does); every cell of a kept
+    block is stored, including values below the threshold (the halo).
+    """
     cfg = reader.get_config()
     return float(cfg[f'{pop}_sparse']['minValue'][0])
 
 
 def get_inner_boundary_cells(reader):
+    """
+    Spatial cell ids inside the inner boundary (the copysphere radius around its centre). Their VDFs
+    are boundary conditions, not physics, and global runs skip them.
+    """
     cfg = reader.get_config()
     boundary_cfg = cfg['copysphere']
     r_min = float(boundary_cfg['radius'][0])
@@ -93,7 +108,10 @@ def get_inner_boundary_cells(reader):
 
 def build_cube(cellid, reader, vlim, vlen, dv):
     """
-    cube[iz, iy, ix] convention.
+    Dense VDF of one spatial cell: cube[iz, iy, ix] of shape (vlen, vlen, vlen), float32.
+
+    Only the velocity cells stored in the file are filled; dropped blocks stay 0. Stored values below the
+    sparsity threshold (the halo) are kept as they are, and tiny negatives (~ -1e-20) occur.
     """
     vdf = reader.read_velocity_cells(cellid, "proton")
 
@@ -114,30 +132,23 @@ def build_cube(cellid, reader, vlim, vlen, dv):
     return cube
 
 
-def get_vdf_bounding_box(cube, vlim, vlen, sp_th=1e-15, margin=0):
+def get_vdf_bounding_box(cube, vlim, vlen):   
     """
-    Axis-aligned bounding box of the VDF support (cells >= sp_th).
-    cube convention: cube[iz, iy, ix].
+    Axis-aligned box of everything stored for the cell (f > 0, halo included), used to crop a
+    reconstruction to the data region with apply_bounding_box. The box cannot be recovered from the
+    coefficients, so it has to be stored with them. For Vlasiator data it is block-aligned.
 
-    margin : int, extra cells to grow the box by on every side (clipped to
-        the grid), for callers that want breathing room around the tight
-        support -- e.g. apply_bounding_box() on a reconstruction, which
-        otherwise crops it off exactly at the last real-data cell, mid-slope
-        rather than letting it decay into view.
-
-    Returns None if no cell reaches sp_th, otherwise a dict:
-        idx  : ((iz_min,iz_max), (iy_min,iy_max), (ix_min,ix_max))  inclusive
-        vel  : ((vz_min,vz_max), (vy_min,vy_max), (vx_min,vx_max))  physical [m/s]
-        n_active : number of cells >= sp_th
+    Returns None for an empty cube, otherwise a dict:
+        idx       ((iz0, iz1), (iy0, iy1), (ix0, ix1))   inclusive index bounds
+        vel       the same bounds as cell-centre velocities [m/s]
+        n_active  number of cells with f > 0
     """
-    mask = cube >= sp_th
+    mask = cube > 0 
     if not mask.any():
         return None
 
     iz_idx, iy_idx, ix_idx = np.nonzero(mask)
-    idx_bounds = ((max(int(iz_idx.min()) - margin, 0), min(int(iz_idx.max()) + margin, vlen - 1)),
-                  (max(int(iy_idx.min()) - margin, 0), min(int(iy_idx.max()) + margin, vlen - 1)),
-                  (max(int(ix_idx.min()) - margin, 0), min(int(ix_idx.max()) + margin, vlen - 1)))
+    idx_bounds = tuple((int(i.min()), int(i.max())) for i in (iz_idx, iy_idx, ix_idx))
 
     dv = 2 * vlim / vlen
     v_ax = velocity_axis(vlim, vlen, dv)
@@ -148,36 +159,14 @@ def get_vdf_bounding_box(cube, vlim, vlen, sp_th=1e-15, margin=0):
 
 def apply_bounding_box(cube, idx_bounds):
     """
-    Zero out everything outside an axis-aligned index box (as returned by
-    get_vdf_bounding_box()['idx']). Cheaper than a per-voxel mask and enough
-    to cut the Hermite-ringing lobes that sit outside the true VDF support.
+    Copy of `cube` with everything outside the index box `idx_bounds`
+    (get_vdf_bounding_box()['idx']) set to 0.
     """
     out = np.zeros_like(cube)
     (iz0, iz1), (iy0, iy1), (ix0, ix1) = idx_bounds
     out[iz0:iz1 + 1, iy0:iy1 + 1, ix0:ix1 + 1] = cube[iz0:iz1 + 1, iy0:iy1 + 1, ix0:ix1 + 1]
     return out
 
-
-def apply_spectral_window(coeffs, max_order, window='lanczos'):
-    """
-    Taper Hermite coefficients smoothly to zero as total order s -> max_order,
-    instead of the implicit hard cutoff from truncating the level loop at
-    max_order in adaptive_transform. Targets Gibbs ringing from truncating
-    the coefficient series itself -- a different mechanism from the ringing
-    VDF padding addresses (the sharp real-space edge), and independent of it.
-
-    window : 'lanczos'        w(s) = sinc(s / max_order)
-             'raised_cosine'  w(s) = 0.5 * (1 + cos(pi * s / max_order))
-
-    Returns a new coefficient dict; does not mutate the input.
-    """
-    if window == 'lanczos':
-        w = lambda s: float(np.sinc(s / max_order))
-    elif window == 'raised_cosine':
-        w = lambda s: 0.5 * (1.0 + math.cos(math.pi * s / max_order))
-    else:
-        raise ValueError(f"unknown window {window!r}")
-    return {k: v * w(sum(k)) for k, v in coeffs.items()}
 
 
 ################################
@@ -189,9 +178,13 @@ def apply_spectral_window(coeffs, max_order, window='lanczos'):
 
 def hermite_basis(v_ax, order, vth, u):
     """
-    Compute orthonormal Hermite basis functions φ_n(v) = H_n((v-u)/vth) * G / norm_n
-    where H_n are physicist's Hermite polynomials weighted by Gaussian G = exp(-x²/2).
-    Returns array of shape (order, len(v_ax)).
+    Orthonormal Hermite functions sampled on `v_ax`, shape (order, len(v_ax)):
+
+        phi_n(v) = H_n(x) exp(-x^2/2) / sqrt(2^n n! sqrt(pi) vth),   x = (v - u) / vth,
+
+    with H_n the physicists' Hermite polynomials (H_n = 2x H_{n-1} - 2(n-1) H_{n-2}). They satisfy
+    int phi_n phi_m dv = delta_nm in the continuum; on the grid this holds only while the oscillations
+    of phi_n are resolved, i.e. vth spans several cells dv.
     """
     x = (v_ax - u) / vth
     H = np.zeros((order, len(x)))
@@ -206,7 +199,9 @@ def hermite_basis(v_ax, order, vth, u):
 
 
 def get_drift_velocity_cube(cube, vlim, vlen):
-    """Compute bulk drift velocity [ux, uy, uz] from VDF cube."""
+    """
+    Bulk velocity [ux, uy, uz] [m/s]: first moment of the cube over the density n = sum(f) dv^3.
+    """
     dv   = 2 * vlim / vlen
     v_ax = velocity_axis(vlim, vlen, dv)
     n    = cube.sum() * dv**3
@@ -218,23 +213,11 @@ def get_drift_velocity_cube(cube, vlim, vlen):
 
 def get_thermal_velocity_cube(cube, vlim, vlen, u):
     """
-    Compute isotropic thermal velocity from VDF cube.
+    Isotropic thermal speed sqrt((Pxx + Pyy + Pzz) / (3 n)) [m/s] about the drift u = [ux, uy, uz],
+    from the 1D projections of the cube onto each velocity axis.
 
-    Uses 1-D axis projections (cube.sum over the other two axes) instead of
-    building three dense (vlen,vlen,vlen) meshgrids -- avoids ~330MB of
-    temporary arrays per call and is ~100x+ faster at vlen~240 (measured
-    1.8s -> 0.01s on a BIE bulk file cell).
-
-    This also fixes a pre-existing correctness bug: with three equal-length
-    inputs, np.meshgrid(v_ax, v_ax, v_ax, indexing='xy') returns X varying
-    along axis 1 (the cube's y-axis), Y varying along axis 0 (z-axis), and
-    Z varying along axis 2 (x-axis) -- but the old code paired X with u[0]
-    (=ux), Y with u[1] (=uy), Z with u[2] (=uz), i.e. the wrong
-    axis/velocity-component pairing. For an anisotropic drift velocity
-    (the normal case) this silently inflated vth -- measured 524 km/s vs.
-    the correct 180 km/s on one BIE cell with u ~ [-659, 4.6, -143] km/s --
-    which in turn mis-scales the Hermite basis itself and plausibly
-    contributed to cells failing to converge even at high order.
+    For a VDF with several populations this is their overall spread, not the width of any one of them,
+    and the Hermite basis built on it is correspondingly wide.
     """
     dv   = 2 * vlim / vlen
     v_ax = velocity_axis(vlim, vlen, dv)
@@ -265,40 +248,44 @@ def get_thermal_velocity_cube(cube, vlim, vlen, u):
 def adaptive_transform(vdf, vlim, vlen, vth, u,
                        max_order=14,
                        tolerance=0.15,
+                       sqrt_f=True,
                        ):
     """
-    Level-by-level adaptive Hermite transform with a Parseval stopping
-    check: stops as soon as the running reconstructed power covers enough
-    of the VDF's total power, WITHOUT paying for orders beyond the one
-    actually reached -- that early exit is the whole point of "adaptive".
+    Adaptive Hermite transform of a VDF cube, level by level, with a Parseval stopping rule.
 
-    The original per-triple implementation called
-    np.einsum('zyx,x,y,z->', vdf, Hx[n], Hy[m], Hz[l]) once per (l,m,n)
-    coefficient -- each call redoing a full O(vlen^3) contraction from
-    scratch with NO reuse between coefficients, even ones sharing the same
-    n or m. That made the cost scale with the number of coefficients
-    computed (~max_order^3/6), not with how many levels were actually
-    needed.
+    Coefficients C[l, m, n] = sum vdf * Hz[l] * Hy[m] * Hx[n] * dv^3 (index order z, y, x, like the
+    cube) are computed in levels s = l + m + n (tetrahedral truncation; levels 0..N-1 hold
+    N(N+1)(N+2)/6 coefficients). After each level
 
-    This version separates the contraction into three axis passes (same
-    identity as get_hermite_spectra_cube: C[l,m,n] = sum_x sum_y sum_z
-    vdf * Hx[n] * Hy[m] * Hz[l]) and CACHES each partial result the first
-    time it is needed:
-      Px[n]    = sum_x vdf[z,y,x] * Hx[n,x]          -> (vlen,vlen), O(vlen^3)
-      Pxy[n,m] = sum_y Px[n][z,y] * Hy[m,y]          -> (vlen,),     O(vlen^2)
-      C[l,m,n] = sum_z Pxy[n,m][z] * Hz[l,z] * dv^3  -> scalar,      O(vlen)
-    Px[n] is the dominant O(vlen^3) cost and is computed AT MOST ONCE per
-    distinct n -- so a cell that stops at order_used=7 only ever pays for
-    n in [0,7), restoring the adaptive early-exit saving that the naive
-    per-triple loop had in spirit but not in practice (it was already
-    O(vlen^3) per COEFFICIENT, so even stopping early was still far more
-    expensive than it needed to be). A cell that needs the full max_order
-    pays about what one full get_hermite_spectra_cube call would, still
-    ~max_order^2/6 cheaper than the old per-triple loop (Pxy is O(vlen^2),
-    not O(vlen^3)). Measured ~3000x faster than the old loop for a cell
-    that uses the full max_order=20 on a 240^3 cube, for numerically
-    identical coefficients.
+        delta_s = sqrt(1 - sum C^2 / (sum vdf^2 dv^3))
+
+    is the relative L2 error of the truncated series (Parseval). The loop stops at the first s > 2 with
+    delta_s < tolerance, or at max_order; higher levels are never computed.
+
+    sqrt_f=True expands g = sqrt(f) instead of f, with the basis scaled to sqrt(2)*vth (the width of the
+    square root of a Maxwellian); reconstruct_vdf_adaptive(..., sqrt_f=True) squares the result back.
+    The reconstruction is then non-negative, ringing outside the support drops from ~eps*f_max to
+    ~eps^2*f_max, and delta measures the density misfit (int g^2 = n). Pass the physical vth in both
+    modes; the scaling is done here. Coefficients from the two modes are not interchangeable.
+
+    Cost: the contraction is split into axis passes, each cached the first time it is needed,
+        Px[n]    = sum_x vdf * Hx[n]         (vlen, vlen)   O(vlen^3), once per n
+        Pxy[n,m] = sum_y Px[n] * Hy[m]       (vlen,)        O(vlen^2)
+        C[l,m,n] = sum_z Pxy[n,m] * Hz[l] * dv^3            O(vlen)
+    so a cell that stops early pays only for the levels it reached.
+
+    Caveats: delta is an L2 measure dominated by the peak, so it says little about the tails. When vth
+    is only ~1-2 dv (cold VDFs) the sampled basis is not orthonormal and delta can drop to 0 spuriously.
+
+    Returns
+        coeffs      {(l, m, n): C} for every level up to the stopping one
+        order_used  number of levels computed (s + 1); the `order` for reconstruct_vdf_adaptive
+        deltas      {s: delta_s}
     """
+    if sqrt_f:
+        vdf = np.sqrt(np.clip(vdf, 0, None))    # Vlasiator cubes have tiny negatives (~-1e-20)
+        vth = np.sqrt(2) * vth
+
     dv   = 2.0 * vlim / vlen
     v_ax = velocity_axis(vlim, vlen, dv)
 
@@ -348,24 +335,32 @@ def adaptive_transform(vdf, vlim, vlen, vth, u,
 
 
 def coeffs_into_cube(coeffs, hermite_order):
-    """Dense (hermite_order, hermite_order, hermite_order) array from a coefficient dict."""
+    """
+    Dense (hermite_order,)*3 array from a {(l, m, n): c} dict, zero where a coefficient is absent.
+    """
     h_cube = np.zeros([hermite_order, hermite_order, hermite_order])
     for k, v in coeffs.items():
         h_cube[k] = v
     return h_cube
 
 
-def reconstruct_vdf_adaptive(coeffs, vlim, vlen, order, vth, u):
+def reconstruct_vdf_adaptive(coeffs, vlim, vlen, order, vth, u, sqrt_f=True):
     """
-    Dense VDF from a coefficient dict via ONE contraction (coeffs_into_cube +
-    einsum with optimize=True). vt.reconstruct_vdf_adaptive does the same sum
-    as one full-cube einsum per coefficient, which is far slower at vlen=240.
+    VDF cube from a coefficient dict: f[z, y, x] = sum C[l, m, n] Hz[l](z) Hy[m](y) Hx[n](x), done as
+    one einsum over the dense coefficient cube.
+
+    `order`, `vth`, `u` and `sqrt_f` must match the adaptive_transform call that produced `coeffs`
+    (order = its order_used, or the side of a zero-padded dense spectrum). sqrt_f=True rebuilds
+    g = sqrt(f) on the sqrt(2)*vth basis and returns g**2, which is non-negative.
     """
+    if sqrt_f:
+        vth = np.sqrt(2) * vth
     dv = 2.0 * vlim / vlen
     v_ax = velocity_axis(vlim, vlen, dv)
     Hx, Hy, Hz = (hermite_basis(v_ax, order, vth, u[i]) for i in range(3))
     h_cube = coeffs_into_cube(coeffs, order)
-    return np.einsum('lmn,nx,my,lz->zyx', h_cube, Hx, Hy, Hz, optimize=True)
+    rec = np.einsum('lmn,nx,my,lz->zyx', h_cube, Hx, Hy, Hz, optimize=True)
+    return rec**2 if sqrt_f else rec
 
 
 
