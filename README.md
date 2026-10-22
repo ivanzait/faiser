@@ -1,89 +1,39 @@
-# Hermite Corrector
+# Adaptive Hermite compression of Vlasiator proton VDFs
 
-An ML safeguard for Hermite transform of velocity
-distribution functions (VDFs) from [Vlasiator](https://github.com/fmihpc/vlasiator)
-hybrid-Vlasov simulations.
-
-
-## Method
-
-**Transformation.** `data_processing/` holds the core VDF/Hermite
-primitives, kept separate from the ML-specific code so it can be shared
-with (and stay compatible with) other tools working on the same
-decomposition. `vdf_tools.py` reads a Vlasiator VDF into a dense
-velocity-space cube; `adaptive_hermite.py` computes an adaptive
-tetrahedral Hermite decomposition up to a configurable maximum order,
-tracking both a f-space error (`eps_rel`, via Parseval) and log-space RMS error (`eps_log`).
-
-**Correction.** Everything specific to the ML safeguard lives in
-`ml_corrector/`. The MLP corrector (`ml_corrector/corrector_model.py`)
-predicts a delta correction applied multiplicatively in log-space:
+## Layout
 
 ```
-f_final(v) = f_rec_full(v) * exp(Δ_pred(v))    inside the sparsity mask
-           = 0                                  outside (structural)
+tools/vdf_tools.py                  reading VDFs, moments, adaptive Hermite transform, reconstruction, metrics
+plot_routines/plot_tools.py         1D cuts, 2D slices / projections, Hermite spectrum
+plot_routines/check_vdf.py          raw VDF of one cell, moments vs the ones stored in the bulk file
+runners/run_one_cell.py             transform one cell -> data/one_cell_run_<run>_tstep<N>_cell<ID>.npz
+runners/one_cell_view.py            npz -> reconstruction, metrics, plots
+runners/vdfs_for_initialization.py  many cells -> one dataset npz
+runners/two_stream_profile.py       f(vx, x) profile of the two-stream test run
 ```
 
-This guarantees positivity regardless of the network's
+## Algorithm
 
-**Features.** The corrector's input combines three signals, each covering
-a different blind spot of the others (see the presentation for the full
-story of why all three were needed):
+- **Cube.** The VDF of a spatial cell is read into a dense `cube[iz, iy, ix]` on the velocity mesh. Vlasiator
+  stores whole 4x4x4 blocks, so cells below the sparsity threshold inside kept blocks (the halo) are present;
+  dropped blocks are 0.
 
-| Feature | Size | Role |
-|---|---|---|
-| Low-order coefficients (`S_low` ≤ 2) | 10 | coarse global condition, already computed |
-| 1-D Hermite-space power spectra (`sum_(l,m) C[l,m,n]^2` per axis) | 3×23 = 69 | cheap, strong "how non-Maxwellian" signal |
-| Local 3×3×3 patch of `log(f_rec_full)` | 27 | spatial context to localize/shape the correction |
+- **Basis.** Orthonormal Hermite functions centred on the bulk velocity $u$ with scale $v_{th}$, both from the
+  moments of the cube. Coefficients $C_{lmn}$ are grouped in levels $s = l+m+n$ (tetrahedral truncation), so
+  levels $0 \dots N-1$ give $N(N+1)(N+2)/6$ coefficients.
 
-**Regularization.** A per-cell adaptive penalty on the predicted
-correction, `λ_cell = λ_max / (1 + (mean_sq_cell / ref_var)^power)`,
-suppresses correction on cells that are already well-reconstructed
-without limiting it on genuinely hard ones. This is currently the
-weakest point of the design — `λ_max`, `power`, `ref_var` are tuned
-empirically per dataset.
+- **Stopping rule.** The basis is orthonormal, so by Parseval the power left out after level $s$ is known
+  without reconstructing anything:
 
+  $$\delta_s = \sqrt{1 - \frac{\sum_{s' \le s} C_{lmn}^2}{\int f^2\, d^3v}}$$
 
-## Repository layout
+  Levels are added one by one and the loop stops at the first $s > 2$ with $\delta_s <$ `tolerance`, or at
+  `max_order`. Higher levels are never computed, so cells with simple VDFs are cheap.
 
-```
-data_processing/                 # core library: colleague-compatible, no ML dependency
-  vdf_tools.py                   # VDF cube extraction, drift/thermal velocity, sparsity threshold
-  adaptive_hermite.py            # tetrahedral Hermite transform + reconstruction
-ml_corrector/                    # ML-corrector library
-  corrector_model.py             # the MLP, feature helpers (axis spectra, patches)
-  decomposition_cache.py         # disk cache for the expensive full decomposition
-  EXPERIMENT_LOG.md              # full experimental log
-  corrector_weights.pt           # example pretrained checkpoint (multi-snapshot training)
-scripts/                         # all runnable entry points (import from the two folders above)
-  build_dataset.py               # parallel (multiprocessing), multi-timestep dataset builder
-  build_dataset.sh               # config wrapper around build_dataset.py
-  corrector_train.py             # trains the MLP from a prebuilt dataset
-  corrector_eval.py              # within-snapshot held-out evaluation + before/after plots
-  corrector_validate.py          # cross-timestep evaluation on an entirely unseen bulk file
-  run_diagnostic.py              # single-cell Hermite convergence / spectra / VDF plots
-  run_random_cells.py            # adaptive-order convergence sweep over random cells
-  make_feature_figures.py        # regenerates the low-S / spectra / patch illustration figures
-  make_presentation.py           # assembles docs/hermite_corrector_presentation.pdf
-docs/
-  hermite_corrector_presentation.pdf
-  PROJECT_PLAN.md                # original design doc (partly superseded by EXPERIMENT_LOG.md)
-  figures/                       # a curated subset of generated plots, used above
-```
+- **$\sqrt{f}$ expansion** (`sqrt_f=True`, default). The transform expands $g = \sqrt{f}$ on a basis of scale
+  $\sqrt{2}\,v_{th}$ and the reconstruction is squared back. It is then non-negative, ringing outside the support
+  drops from $\sim\epsilon f_{max}$ to $\sim\epsilon^2 f_{max}$, and $\delta$ measures the density error
+  ($\int g^2 = n$).
 
-## Setup
-
-```bash
-pip install -r requirements.txt
-```
-
-You will also need [analysator](https://github.com/fmihpc/analysator)
-(imported here under its legacy name, `import pytools as pt`) and a set of
-Vlasiator `bulk.*.vlsv` files from a reconnection run. Neither is included
-in this repository. By default the scripts expect bulk files under
-`reconnection_2d_beta025/` at the repo root (edit `BULKDIR` / `--bulkdir`
-to point elsewhere). Generated caches, datasets and plots are written
-under `ml_corrector/{data,datasets,plots}/` and are gitignored.
-
-
-MIT — see [LICENSE](LICENSE).
+- **Bounding box.** The box of everything stored for the cell ($f > 0$, halo included) is saved with the
+  coefficients, and the reconstruction is zeroed outside it.

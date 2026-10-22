@@ -2,21 +2,21 @@ __pycache__/
 *.pyc
 *.swp
 
+.venv
+
+data/
+plots/
+
 # Vlasiator bulk files / simulation output are not part of this repo
 *.vlsv
 reconnection_2d_beta025/
 reconnection_2d/
 reconnection_2d_beta02/
 
-# Expensive per-cell decomposition caches and built training datasets
-# (regenerate locally with scripts/build_dataset.py -- see README)
-ml_corrector/data/
-ml_corrector/datasets/
-ml_corrector/checkpoints/
+# Hermite spectra and datasets written by runners/ (regenerate locally)
 *.npz
 
-# Generated diagnostic plots (regenerate with scripts/run_diagnostic.py /
-# scripts/make_feature_figures.py -- a curated subset is committed under docs/figures/)
-ml_corrector/plots/
+profiling/
 
 .atl
+logs/
