@@ -4,8 +4,8 @@ into a dense (HN,HN,HN) cube, so every cell's hermite array has the same
 shape and they stack into one array) for a set of cells, saved into one
 compressed npz.
 
-Parallelized the same way as profile_bulk.py: one process per cell, each
-with its own file reader (readers aren't picklable/fork-safe to share).
+Parallelized with one process per cell, each with its own file reader
+(readers aren't picklable/fork-safe to share).
 
 NOTE on SAVE_DENSE_VDF: the raw dense VDF cube is ~vlen^3 floats/cell --
 at vlen=240 that's ~55MB/cell, so saving it for many cells adds up fast
@@ -16,7 +16,7 @@ scale up to more cells.
 
 Usage
 -----
-python3 data_processing/vdfs_for_initialization.py   # run from the repo root
+python3 runners/vdfs_for_initialization.py   # run from the repo root
 
 Tunable parameters are in the CONFIG block below.
 """
@@ -28,7 +28,7 @@ import numpy as np
 sys.path.insert(0, "/home/ivanzait/analysator")
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 import pytools as pt
-from data_processing import vdf_tools as vt
+from tools import vdf_tools as vt
 
 # ===
 # CONFIG -- edit these
@@ -40,7 +40,7 @@ HN        = 20      # fixed Hermite order -> every cell's hermite cube has shape
 TOLERANCE = 0.05     # adaptive_transform stops early once the Parseval delta < this
 SQRT_F    = True     # expand sqrt(f), see vdf_tools.adaptive_transform; saved in the npz for the reconstruction
 
-GLOBAL_RUN = True    # skip inner-boundary cells with no real VDF -- see profile_bulk.py
+GLOBAL_RUN = True    # skip inner-boundary cells, whose VDFs are boundary conditions, not physics
 SAVE_DENSE_VDF = True   # see NOTE above before raising N_CELLS much past a few dozen
 
 N_WORKERS = max(1, (os.cpu_count() or 2) - 2)   # 1 = serial

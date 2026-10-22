@@ -1,6 +1,6 @@
 """Plot the raw VDF of one cell (three projections) and compare its moments with the ones stored in the bulk file.
 
-    python scripts/check_vdf.py [runid] [tstep] [cellid]
+    python3 plot_routines/check_vdf.py [runid] [tstep] [cellid]
 """
 import os, sys
 import numpy as np
@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 sys.path.insert(0, "/home/ivanzait/analysator")
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 import pytools as pt
-from data_processing import vdf_tools as vt
+from tools import vdf_tools as vt
 from plot_routines import plot_tools
 
 plt.rcParams['text.usetex'] = False

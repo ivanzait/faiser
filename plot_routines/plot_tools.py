@@ -10,7 +10,7 @@ vel_bounds is get_vdf_bounding_box()['vel'] = ((vz), (vy), (vx)), indexed like t
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.colors import LogNorm
-from data_processing import vdf_tools as vt
+from tools import vdf_tools as vt
 
 
 ################################

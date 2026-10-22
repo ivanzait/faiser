@@ -16,9 +16,8 @@ else:
     sys.path.insert(0, "/Users/ivanzait/Documents/Documents_LM4500/Codes/analysator")
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../data_processing'))
 import pytools as pt
-import vdf_tools as vt
+from tools import vdf_tools as vt
 import matplotlib as mpl
 mpl.rcParams['text.usetex'] = False   # must come after the pt import
 

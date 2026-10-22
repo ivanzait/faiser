@@ -3,16 +3,17 @@ import os, sys
 sys.path.insert(0, "/home/ivanzait/analysator")
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 import pytools as pt
-from data_processing import vdf_tools as vt
+from tools import vdf_tools as vt
 
-runid='BIE'
-tstep=1125
+runid='TSI'
+tstep=30
 
-BULK_FILE = f"/turso/group/spacephysics/vlasiator/data/L0/2D/{runid}/bulk.{tstep:07d}.vlsv"
-CELL_ID   = 795501
+
+BULK_FILE = f"/turso/group/spacephysics/vlasiator/data/L0/1D/{runid}/bulk.{tstep:07d}.vlsv"
+CELL_ID   = 200
 MAX_ORDER = 33
-TOLERANCE = 0.01
-OUTFILE   = os.path.join(os.path.dirname(__file__), '..', f'data/one_cell_run_{runid}_tstep{tstep}.npz')
+TOLERANCE = 0.005
+OUTFILE   = os.path.join(os.path.dirname(__file__), '..', f'data/one_cell_run_{runid}_tstep{tstep}_cell{CELL_ID}.npz')
 SQRT_F    = True   # expand sqrt(f), see vdf_tools.adaptive_transform; saved in the npz for the reconstruction
 DENSE_SPECTRA = False  # if True, save all coefficients up to MAX_ORDER, not just the nonzero ones  
 
@@ -44,7 +45,8 @@ def main():
         v_means=np.array(u), v_ths=np.array(vth),
         hermite_coeffs=np.array(coeffs), order_used=np.array(order),
         bbox_idx=np.array(bbox),   # (3, 2): per axis (z, y, x), inclusive index bounds
-        vlim=vlim, vlen=vlen, dense=DENSE_SPECTRA, sqrt_f=SQRT_F, cube=cube
+        vlim=vlim, vlen=vlen, dense=DENSE_SPECTRA, sqrt_f=SQRT_F, cube=cube,
+        bulk_file=BULK_FILE, runid=runid, tstep=tstep,   # where the original is, for one_cell_view.py
     )
     
     np.savez_compressed(OUTFILE, **save_kwargs)
