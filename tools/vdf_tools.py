@@ -375,28 +375,24 @@ def reconstruction_metrics(cube, rec, sp_th, dv, n_coeffs=None):
 
     Returns a dict:
         n_orig, n_rec      densities sum(f) dv^3 [m^-3]
-        density_err        n_rec / n_orig - 1
-        neg_mass_frac      negative mass of rec over its positive mass (0 for sqrt_f reconstructions)
-        core_cells         cells with cube >= sp_th
-        dlog_median, dlog_p90
-                           |log10(rec / cube)| over the core cells; rec <= 0 is clamped to 1e-300, so
-                           such cells show up as values ~300 in the tail
+        l2_err             ||rec - cube|| / ||cube||, relative L2 error in f-space
     and, if n_coeffs (number of Hermite coefficients kept) is given:
         stored_cells       non-zero cells of `cube`: the velocity cells Vlasiator stored for this VDF
         n_coeffs           n_coeffs
         compression        stored_cells / n_coeffs (u, vth and the box, 10 more numbers, are not counted)
     """
-    core = cube >= sp_th
-    pos = rec[rec > 0].sum()
-    dlog = np.abs(np.log10(np.maximum(rec[core], 1e-300) / cube[core]))
+    #core = cube >= sp_th
+    #pos = rec[rec > 0].sum()
+    ##dlog = np.abs(np.log10(np.maximum(rec[core], 1e-300) / cube[core]))
     out = {
         'n_orig':          float(cube.sum() * dv**3),
         'n_rec':           float(rec.sum() * dv**3),
-        'density_err':     float(rec.sum() / cube.sum() - 1),
-        'neg_mass_frac':   float(abs(rec[rec < 0].sum()) / pos) if pos > 0 else 0.0,
-        'core_cells':      int(core.sum()),
-        'dlog_median':     float(np.median(dlog)) if dlog.size else 0.0,
-        'dlog_p90':        float(np.percentile(dlog, 90)) if dlog.size else 0.0,
+        'l2_err':          float(np.linalg.norm(rec - cube) / np.linalg.norm(cube)),
+        
+        #'neg_mass_frac':   float(abs(rec[rec < 0].sum()) / pos) if pos > 0 else 0.0,
+        #'core_cells':      int(core.sum()),
+        #'dlog_median':     float(np.median(dlog)) if dlog.size else 0.0,
+        #'dlog_p90':        float(np.percentile(dlog, 90)) if dlog.size else 0.0,
     }
     if n_coeffs is not None:
         stored = int(np.count_nonzero(cube))

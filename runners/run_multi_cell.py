@@ -23,7 +23,7 @@ tstep=30
 
 BULK_FILE = f"/turso/group/spacephysics/vlasiator/data/L0/1D/{runid}/bulk.{tstep:07d}.vlsv"
 CELL_SELECTION = 'random'  # 'random': N_CELLS cells drawn from the cells with a VDF; 'all': every such cell
-N_CELLS   = 20
+N_CELLS   = 30
 SEED      = 7
 MAX_ORDER = 33
 TOLERANCE = 0.02
@@ -54,7 +54,7 @@ def process_cell(cell_id, reader, vlim, vlen, dv):
     return row
 
 
-def main():
+def main( tstep):
 
     reader = pt.vlsvfile.VlsvReader(BULK_FILE)
     vlim,vlen,dv = vt.get_vdf_parameters(reader)
@@ -64,8 +64,8 @@ def main():
         cells = np.sort(np.random.default_rng(SEED).choice(cells, size=min(N_CELLS, len(cells)), replace=False))
 
     rows = []
-    for cell_id in (int(c) for c in cells):
-        print(f'Processing cell {cell_id}...')
+    for cell_id in (int(c) for c in cells):       
+        print('processing cell', cell_id)
         rows.append(process_cell(cell_id, reader, vlim, vlen, dv))
 
     col = lambda k: np.array([r[k] for r in rows])                  # stack one field along cells
@@ -86,4 +86,6 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    for tstep in range(5, 30, 5):
+        print('Time step', tstep)
+        main( tstep )
