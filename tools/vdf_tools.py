@@ -5,7 +5,7 @@ VDF tools for Vlasiator bulk files and the adaptive Hermite transform.
             get_cellid_at_coords, get_nearest_vdf_cellid
   grid      velocity_axis, get_vdf_bounding_box, apply_bounding_box
   moments   get_drift_velocity_cube, get_thermal_velocity_cube
-  Hermite   hermite_basis, adaptive_transform, coeffs_into_cube, reconstruct_vdf_adaptive
+  Hermite   hermite_basis, adaptive_transform, coeffs_into_cube, cesaro_coeffs, reconstruct_vdf_adaptive
   checks    reconstruction_metrics
 
 Cubes follow cube[iz, iy, ix] on a cubic velocity mesh of vlen cells per axis with cell centres
@@ -167,6 +167,31 @@ def apply_bounding_box(cube, idx_bounds):
     (iz0, iz1), (iy0, iy1), (ix0, ix1) = idx_bounds
     out[iz0:iz1 + 1, iy0:iy1 + 1, ix0:ix1 + 1] = cube[iz0:iz1 + 1, iy0:iy1 + 1, ix0:ix1 + 1]
     return out
+
+
+def apply_block_mask(rec, sp_th, width=1, wid=4, detect=None):
+    """
+    Copy of `rec` keeping only the velocity cells Vlasiator's sparsity rule would keep, applied to `rec` itself:
+    a wid^3 block has content if any of its cells is >= sp_th, and every block within `width` blocks of a content
+    block (blockAddWidthV) is kept whole, sub-threshold halo included; all other cells are set to 0. The rule's
+    other part, blocks kept because a neighbouring SPATIAL cell has content there, cannot be reproduced from one
+    cell. Needs vlen divisible by wid (blocks start at index 0, as in Vlasiator).
+
+    detect: optional cube used only to decide which blocks have content (e.g. a smoothed reconstruction with
+    less ringing); the mask is then applied to `rec`. Default: rec itself.
+    """
+    nb = rec.shape[0] // wid
+    src = rec if detect is None else detect
+    content = (src.reshape(nb, wid, nb, wid, nb, wid) >= sp_th).any(axis=(1, 3, 5))
+    keep = np.zeros_like(content)
+    padded = np.pad(content, width)
+    r = range(2 * width + 1)
+    for dz in r:                                     # dilation by `width` blocks in all 26 directions
+        for dy in r:
+            for dx in r:
+                keep |= padded[dz:dz + nb, dy:dy + nb, dx:dx + nb]
+    cell_keep = np.repeat(np.repeat(np.repeat(keep, wid, 0), wid, 1), wid, 2)
+    return np.where(cell_keep, rec, 0)
 
 
 
@@ -343,6 +368,19 @@ def coeffs_into_cube(coeffs, hermite_order):
     for k, v in coeffs.items():
         h_cube[k] = v
     return h_cube
+
+
+def cesaro_coeffs(coeffs, order):
+    """
+    Cesaro (Fejer) mean of the Hermite series: the average of the partial sums over levels 0..order-1, which
+    amounts to weighting level s = l + m + n by (order - s) / order. Suppresses the Gibbs ringing of the truncated
+    series at the cost of smoothing it. `coeffs` is a {(l, m, n): c} dict or a dense (order,)*3 array; the result
+    has the same form. With sqrt_f the weights act on the sqrt(f) series, so reconstruct as usual afterwards.
+    """
+    if isinstance(coeffs, dict):
+        return {k: c * max(order - sum(k), 0) / order for k, c in coeffs.items()}
+    l, m, n = np.indices(coeffs.shape)
+    return coeffs * np.clip(order - (l + m + n), 0, None) / order
 
 
 def reconstruct_vdf_adaptive(coeffs, vlim, vlen, order, vth, u, sqrt_f=True):

@@ -23,7 +23,7 @@ tstep=30
 
 BULK_FILE = f"/turso/group/spacephysics/vlasiator/data/L0/1D/{runid}/bulk.{tstep:07d}.vlsv"
 CELL_SELECTION = 'random'  # 'random': N_CELLS cells drawn from the cells with a VDF; 'all': every such cell
-N_CELLS   = 30
+N_CELLS   = 3
 SEED      = 7
 MAX_ORDER = 33
 TOLERANCE = 0.02
@@ -55,7 +55,7 @@ def process_cell(cell_id, reader, vlim, vlen, dv):
 
 
 def main( tstep):
-
+    BULK_FILE = f"/turso/group/spacephysics/vlasiator/data/L0/1D/{runid}/bulk.{tstep:07d}.vlsv"
     reader = pt.vlsvfile.VlsvReader(BULK_FILE)
     vlim,vlen,dv = vt.get_vdf_parameters(reader)
 

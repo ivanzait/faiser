@@ -30,8 +30,8 @@ plt.rcParams['text.usetex'] = False   # importing analysator switches it on; the
 
 NPZ_FILE = os.path.join(os.path.dirname(__file__), '..', 'data', 'one_cell_run_TSI_tstep30_cell200.npz')
 PLOTDIR  = os.path.join(os.path.dirname(__file__), '..', 'plots')
-DIM      = 1         # 1: 1D cuts, 2: 2D slices, both through the centre of the velocity mesh
-ZOOM     = True      # zoom to the box of everything stored for the cell (halo included)
+DIM      = 2         # 1: 1D cuts, 2: 2D slices, both through the centre of the velocity mesh
+#ZOOM     = True      # zoom to the box of everything stored for the cell (halo included)
 
 
 def load_coeffs(hermite_coeffs, dense, order_used):
@@ -45,8 +45,6 @@ def load_coeffs(hermite_coeffs, dense, order_used):
 def main(npz_file):
     stem = os.path.splitext(os.path.basename(npz_file))[0]
     d = np.load(npz_file, allow_pickle=True)                    # a sparse spectrum is a pickled dict
-    if 'bulk_file' not in d.files:
-        sys.exit(f"{npz_file} has no 'bulk_file': written by an older run_one_cell.py, run that again")
     runid, tstep, bulk_file = str(d['runid']), int(d['tstep']), str(d['bulk_file'])
     dense, order_used = bool(d['dense']), int(d['order_used'])
     coeffs, order = load_coeffs(d['hermite_coeffs'], dense, order_used)
@@ -54,26 +52,34 @@ def main(npz_file):
     dv = 2 * vlim / vlen
     sqrt_f = bool(d['sqrt_f']) if 'sqrt_f' in d.files else False   # files from before sqrt_f are plain-f spectra
 
-    rec = vt.reconstruct_vdf_adaptive(coeffs, vlim, vlen, order, float(d['v_ths']), d['v_means'], sqrt_f=sqrt_f)
-    rec = vt.apply_bounding_box(rec, d['bbox_idx'])
-
     reader = pt.vlsvfile.VlsvReader(bulk_file)
     sp_th = vt.get_sparse_threshold(reader)
     cube = vt.build_cube(cell_id, reader, vlim, vlen, dv).astype(np.float64)
 
+    rec = vt.reconstruct_vdf_adaptive(coeffs, vlim, vlen, order, float(d['v_ths']), d['v_means'], sqrt_f=sqrt_f)
+    rec_cesaro = vt.reconstruct_vdf_adaptive(vt.cesaro_coeffs(coeffs,order_used), vlim, vlen, order, float(d['v_ths']), d['v_means'], sqrt_f=sqrt_f )
+    vdf_rec  = np.where(rec_cesaro >= sp_th, rec, vt.apply_block_mask(rec_cesaro, sp_th, width=1))
+#    rec = vt.apply_bounding_box(rec, d['bbox_idx'])
+
+#    reader = pt.vlsvfile.VlsvReader(bulk_file)
+#    sp_th = vt.get_sparse_threshold(reader)
+#    cube = vt.build_cube(cell_id, reader, vlim, vlen, dv).astype(np.float64)
+
     print(f"{runid} t={tstep} cell {cell_id}: {'dense' if dense else 'sparse'} spectrum, order_used={order_used}, "
           f"sqrt_f={sqrt_f}, u={np.round(d['v_means'] / 1e3, 1)} km/s, vth={float(d['v_ths']) / 1e3:.1f} km/s")
     n_coeffs = order_used * (order_used + 1) * (order_used + 2) // 6       # levels 0..order_used-1, tetrahedral
-    for k, v in vt.reconstruction_metrics(cube, rec, sp_th, dv, n_coeffs=n_coeffs).items():
+    for k, v in vt.reconstruction_metrics(cube, vdf_rec, sp_th, dv, n_coeffs=n_coeffs).items():
         print(f'  {k:15s} {v:.4g}' if isinstance(v, float) else f'  {k:15s} {v}')
 
-    vel_bounds = vt.get_vdf_bounding_box(cube, vlim, vlen)['vel'] if ZOOM else None
-    cubes, labels = [cube, rec], ['original', f'reconstruction (order {order_used}, sqrt_f={sqrt_f})']
+#    vel_bounds = vt.get_vdf_bounding_box(cube, vlim, vlen)['vel'] if ZOOM else None
+    cubes, labels = [cube, vdf_rec], ['original', f'reconstruction (order {order_used}, sqrt_f={sqrt_f})']
     title = f'{runid}   t = {tstep}   cell {cell_id}'
     os.makedirs(PLOTDIR, exist_ok=True)
-    for name, fig in ((f'cuts_{DIM}D', plot_tools.vdf_figure(cubes, vlim, labels, dim=DIM, sp_th=sp_th,
-                                                             vel_bounds=vel_bounds)),
-                      ('projections', plot_tools.vdf_2d(cubes, vlim, labels, reduce='sum', vel_bounds=vel_bounds))):
+    figs = {
+        f'cuts_{DIM}D': plot_tools.vdf_figure(cubes, vlim, labels, dim=DIM, sp_th=sp_th),
+        'projections':  plot_tools.vdf_2d(cubes, vlim, labels, reduce='sum'),
+    }
+    for name, fig in figs.items():
         fig.suptitle(title)
         out = os.path.join(PLOTDIR, f'{stem}_{name}.png')
         fig.savefig(out, dpi=110)
